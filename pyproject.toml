@@ -13,5 +13,15 @@ dependencies = [
     "matplotlib",
 ]
 
+[project.optional-dependencies]
+notebook = [
+    "jupyter",
+    "ipykernel",
+    "pillow",
+]
+detection = [
+    "ultralytics",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/vsa_cognitive_mapping"]
