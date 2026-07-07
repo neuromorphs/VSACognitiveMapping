@@ -1,0 +1,34 @@
+# JEPA world model on the simulated bezier dataset (pipeline bring-up).
+seed: 0
+device: cpu
+
+data:
+  root: data/dataset_vjepa_bezier
+  val_fraction: 0.2
+  img_size: 224        # multiple of DINOv2's patch size 14
+  frame_skip: 1
+
+model:
+  backbone: dinov2_vits14
+  backbone_dim: 384
+  latent_dim: 128
+  lam: 0.1             # SIGReg weight (LeWorldModel default)
+  predictor:
+    kind: mlp
+    hidden_dim: 256
+    action_embed_dim: 32
+  sigreg:
+    num_projections: 256
+    knots: 17
+    t_max: 3.0
+
+train:
+  epochs: 200          # tiny dataset: 2 steps/epoch
+  batch_size: 32
+  lr: 1.0e-3
+  weight_decay: 0.01
+  warmup_steps: 20
+  grad_clip: 1.0
+  log_every: 10
+  checkpoint_every_epochs: 50
+  out_dir: checkpoints/jepa_sim

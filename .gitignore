@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# JEPA experiment artifacts
+checkpoints/
+data/*/embeddings_*.pt
+
+# Local-only project files (docs, notes, data, assistant config)
+.claude/
+data/
+notes/
+CLAUDE.md
+TASKS.md
