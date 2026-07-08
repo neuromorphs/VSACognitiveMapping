@@ -59,6 +59,36 @@ def load_transitions(root: str | Path, split: str, val_fraction: float = 0.2,
     return (df.iloc[:len(df) - n_val] if split == "train" else df.iloc[len(df) - n_val:]).reset_index(drop=True)
 
 
+def load_pose_by_frame(root: str | Path) -> dict[int, tuple[float, float, float, float]] | None:
+    """frame_id -> (x, y, z, yaw_rad) from transitions.csv, or None if that
+    file doesn't exist (e.g. real-robot recordings without simulator ground
+    truth pose). Keyed by frame id rather than row position so lookups stay
+    correct regardless of any frame_skip chaining applied elsewhere."""
+    path = Path(root) / "transitions.csv"
+    if not path.exists():
+        return None
+    df = pd.read_csv(path)
+    pose = {int(row.frame_t): (row.x_t, row.y_t, row.z_t, row.yaw_t_rad) for row in df.itertuples()}
+    last = df.iloc[-1]
+    pose[int(last["frame_tp1"])] = (last["x_tp1"], last["y_tp1"], last["z_tp1"], last["yaw_tp1_rad"])
+    return pose
+
+
+def load_deltas_by_transition(root: str | Path) -> dict[tuple[int, int], tuple[float, float, float, float, float, float]] | None:
+    """(frame_t, frame_tp1) -> (dx_world, dy_world, dz_world, dist_ground,
+    dyaw_rad, dyaw_deg) from transitions.csv, or None if that file doesn't
+    exist. One entry per transition (not per frame), keyed the same way as
+    `load_transitions`'s rows so results can be joined back onto a split's
+    DataFrame by (frame_t, frame_tp1)."""
+    path = Path(root) / "transitions.csv"
+    if not path.exists():
+        return None
+    df = pd.read_csv(path)
+    return {(int(row.frame_t), int(row.frame_tp1)):
+            (row.dx_world, row.dy_world, row.dz_world, row.dist_ground, row.dyaw_rad, row.dyaw_deg)
+            for row in df.itertuples()}
+
+
 class TransitionDataset(Dataset):
     """One item = (img_t, img_tp1, action) for a single transition."""
 

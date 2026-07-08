@@ -3,7 +3,8 @@ import torch
 from torch.utils.data import DataLoader
 
 from vsa_cognitive_mapping.data import (ONEHOT_COLS, CachedTransitionDataset,
-                                        TransitionDataset, load_image, load_transitions)
+                                        TransitionDataset, load_deltas_by_transition,
+                                        load_image, load_pose_by_frame, load_transitions)
 
 
 def test_item_matches_csv_row(bezier_root):
@@ -45,6 +46,33 @@ def test_frame_skip_chains_same_action_runs(bezier_root):
     i = df1.index[df1["frame_t"] == first["frame_t"]][0]
     assert first["image_t"] == df1.iloc[i]["image_t"]
     assert first["image_tp1"] == df1.iloc[i + 1]["image_tp1"]  # skips one frame
+
+
+def test_load_pose_by_frame_matches_csv(bezier_root):
+    pose = load_pose_by_frame(bezier_root)
+    csv = pd.read_csv(bezier_root / "transitions.csv")
+    for row in (csv.iloc[0], csv.iloc[len(csv) // 2]):
+        assert pose[int(row["frame_t"])] == (row["x_t"], row["y_t"], row["z_t"], row["yaw_t_rad"])
+    last = csv.iloc[-1]
+    assert pose[int(last["frame_tp1"])] == (last["x_tp1"], last["y_tp1"], last["z_tp1"], last["yaw_tp1_rad"])
+
+
+def test_load_pose_by_frame_missing_file_returns_none(tmp_path):
+    assert load_pose_by_frame(tmp_path) is None
+
+
+def test_load_deltas_by_transition_matches_csv(bezier_root):
+    deltas = load_deltas_by_transition(bezier_root)
+    csv = pd.read_csv(bezier_root / "transitions.csv")
+    assert len(deltas) == len(csv)
+    for row in (csv.iloc[0], csv.iloc[-1]):
+        key = (int(row["frame_t"]), int(row["frame_tp1"]))
+        assert deltas[key] == (row["dx_world"], row["dy_world"], row["dz_world"],
+                               row["dist_ground"], row["dyaw_rad"], row["dyaw_deg"])
+
+
+def test_load_deltas_by_transition_missing_file_returns_none(tmp_path):
+    assert load_deltas_by_transition(tmp_path) is None
 
 
 def test_seeded_shuffle_is_deterministic(tiny_dataset):
