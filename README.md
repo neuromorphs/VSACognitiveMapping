@@ -67,6 +67,50 @@ Each phase defaults its output (`--out-dir` / `--out`) to a `plots/` folder or
 file next to the embeddings; pass `--help` on any subcommand for the full
 argument list.
 
+## Encoder sweep
+
+`scripts/encoder_sweep.py` compares three ways of turning a frame's JEPA
+latent (`z_t`) into a VSA content vector, using the same `embeddings.pt`
+export as above:
+
+- **random-proj** — one random projection matrix, `d_in -> 2*hd_dim -> hd_dim`
+  complex (the encoder phase 2 uses).
+- **pca-fpe** — top-K PCA components of `z_t` (standardized to unit variance),
+  each FPE-encoded with its own base phasor and bundled together. K is fixed
+  (default 4, `--n-components`).
+- **full-fpe** — same FPE-and-bundle scheme, but over every raw `z_t`
+  dimension instead of a PCA subspace.
+
+```bash
+python scripts/encoder_sweep.py \
+    --embeddings checkpoints/jepa_sim/embeddings.pt --split train
+```
+
+For each setting it computes two metrics — **fidelity** (correlation between
+the encoded content's similarity matrix and the raw `z_t` cosine-similarity
+matrix — does the encoding preserve which frames look alike?) and
+**orthogonality** (1 − mean off-diagonal content similarity — how close the
+content vectors are to mutually orthogonal, i.e. low interference when
+bundled into a shared memory trace).
+
+`--length-scale` (default 1.0) and `--n-components` (default 4) are both
+fixed rather than swept: on this dataset, sweeping length_scale trades
+fidelity for orthogonality along one curve in both directions (long length
+scale collapses every frame to the same encoded vector; short length scale
+aliases nearby latent values into near-random phase), and sweeping K showed
+a non-monotonic fidelity peak around K=4–8 that falls off past it — so K=4
+is the default (also the sweet spot the exploratory notebook found for the
+same top-K PCA + FPE approach). Neither knob, nor bind instead of bundle,
+closes the gap with random-proj's fidelity/orthogonality combination on
+this data.
+
+Output goes to separate directories per encoder under `--out-dir` (default
+`<embeddings dir>/plots`): `random-proj/`, `pca-fpe/`, `full-fpe/`.
+
+For the full derivation — Phasor algebra, all three content encoders, the
+memory-trace formula, and the fidelity/orthogonality metrics — see
+[docs/associative_memory_math.md](docs/associative_memory_math.md).
+
 ## Acknowledgments
 
 TODO: acknowledge the Telluride Neuromorphic AI Workshop.

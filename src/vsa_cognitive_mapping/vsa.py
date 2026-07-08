@@ -135,3 +135,75 @@ def phasor_correlation_matrix(phasors: np.ndarray, eps: float = 1e-8) -> np.ndar
     """
     phasors_unit = phasors / (np.linalg.norm(phasors, axis=1, keepdims=True) + eps)
     return np.real(phasors_unit @ phasors_unit.conj().T)
+
+
+def cosine_self_correlation(x: np.ndarray, eps: float = 1e-8) -> np.ndarray:
+    """(N, D) real vectors -> (N, N) pairwise cosine similarity against themselves."""
+    x_unit = x / (np.linalg.norm(x, axis=-1, keepdims=True) + eps)
+    return x_unit @ x_unit.T
+
+
+def _upper_triangle(mat: np.ndarray) -> np.ndarray:
+    return mat[np.triu_indices_from(mat, k=1)]
+
+
+def fidelity_score(reference_corr: np.ndarray, encoded_corr: np.ndarray) -> float:
+    """Pearson correlation between two pairwise similarity matrices' upper
+    triangles — how well `encoded_corr` preserves the neighbor structure
+    (which items look alike) of `reference_corr`."""
+    return float(np.corrcoef(_upper_triangle(reference_corr), _upper_triangle(encoded_corr))[0, 1])
+
+
+def orthogonality_score(corr: np.ndarray) -> float:
+    """1 - mean |off-diagonal similarity| — how close a set of encoded
+    vectors is to mutually orthogonal (quasi-orthogonality): 1.0 means every
+    pair is orthogonal (no interference when bundled together), 0.0 means
+    every pair is identical (total collapse)."""
+    return float(1.0 - np.abs(_upper_triangle(corr)).mean())
+
+
+def pca_components(x: np.ndarray, n_components: int, eps: float = 1e-8) -> tuple[np.ndarray, np.ndarray]:
+    """Top-`n_components` PCA scores of `x` (N, d_in), each standardized to
+    unit variance, via numpy SVD — no sklearn dependency, same approach as
+    the exploratory notebook's "Associative Memory 2" section.
+
+    Returns:
+        scores: (N, n_components) real, each column unit-variance
+        explained_variance_ratio: (min(N, d_in),) fraction of total variance
+            per component, over the full SVD rank (not just n_components) so
+            a caller can plot a scree/cumulative-variance curve independently
+            of how many components it chose to keep.
+    """
+    centered = x - x.mean(axis=0, keepdims=True)
+    _, s, vt = np.linalg.svd(centered, full_matrices=False)
+    explained_variance = s ** 2 / max(x.shape[0] - 1, 1)
+    explained_variance_ratio = explained_variance / explained_variance.sum()
+
+    scores = centered @ vt[:n_components].T
+    scores = scores / (scores.std(axis=0, keepdims=True) + eps)
+    return scores, explained_variance_ratio
+
+
+def make_axis_bases(n_axes: int, d: int, seed: int) -> list[Phasor]:
+    """One independent random base phasor (dim d) per axis, seeded off
+    `seed + axis index` so a smaller axis count is always a prefix of a
+    larger one — sweeping over how many axes to use doesn't reshuffle the
+    bases already in play."""
+    return [Phasor(dim=d, seed=seed + i) for i in range(n_axes)]
+
+
+def fpe_bundle_encode(scores: np.ndarray, bases: list[Phasor], length_scale: float) -> np.ndarray:
+    """FPE-encode each column of `scores` (N, k) against its matching base
+    phasor from `bases`, scaling the exponent by 1/length_scale (smaller
+    length_scale -> faster rotation per unit of score -> narrower similarity
+    kernel), then bundle (elementwise mean) the k per-axis phasors into one
+    (N, d) complex content array per row.
+
+    Returns:
+        content: (N, d) complex ndarray
+    """
+    content = []
+    for i in range(scores.shape[0]):
+        axis_phasors = [base ** float(scores[i, c] / length_scale) for c, base in enumerate(bases)]
+        content.append(axis_phasors[0].bundle(axis_phasors[1:]).values)
+    return np.stack(content)

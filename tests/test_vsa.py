@@ -1,8 +1,15 @@
 import numpy as np
+import pytest
 import torch
 
 from vsa_cognitive_mapping.vsa import (
     Phasor,
+    cosine_self_correlation,
+    fidelity_score,
+    fpe_bundle_encode,
+    make_axis_bases,
+    orthogonality_score,
+    pca_components,
     phasor_correlation_matrix,
     random_project_to_phasor,
 )
@@ -57,3 +64,124 @@ def test_phasor_correlation_matrix_symmetric_unit_diagonal():
     assert corr.shape == (6, 6)
     assert np.allclose(corr, corr.T, atol=1e-10)
     assert np.allclose(np.diag(corr), 1.0, atol=1e-5)
+
+
+def test_cosine_self_correlation_diagonal_is_one_and_symmetric():
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(6, 10))
+    corr = cosine_self_correlation(x)
+    assert corr.shape == (6, 6)
+    assert np.allclose(corr, corr.T, atol=1e-10)
+    assert np.allclose(np.diag(corr), 1.0, atol=1e-6)
+
+
+def test_fidelity_score_identical_matrices_is_one():
+    torch.manual_seed(0)
+    x = torch.randn(8, 16)
+    z, _ = random_project_to_phasor(x, d=8, seed=0)
+    corr = phasor_correlation_matrix(z.numpy())
+    assert fidelity_score(corr, corr) == pytest.approx(1.0, abs=1e-8)
+
+
+def test_fidelity_score_negated_matrix_is_minus_one():
+    # Pearson correlation of a vector with its own negation is exactly -1 --
+    # a deterministic check that fidelity_score really is a correlation, not
+    # e.g. a distance that would be insensitive to sign.
+    torch.manual_seed(0)
+    x = torch.randn(8, 16)
+    z, _ = random_project_to_phasor(x, d=8, seed=0)
+    corr = phasor_correlation_matrix(z.numpy())
+    assert fidelity_score(corr, -corr) == pytest.approx(-1.0, abs=1e-8)
+
+
+def test_orthogonality_score_identity_matrix_is_one():
+    # No off-diagonal similarity at all -> perfectly orthogonal.
+    assert orthogonality_score(np.eye(5)) == pytest.approx(1.0, abs=1e-10)
+
+
+def test_orthogonality_score_all_ones_matrix_is_zero():
+    # Every pair identical -> zero orthogonality.
+    assert orthogonality_score(np.ones((5, 5))) == pytest.approx(0.0, abs=1e-10)
+
+
+def test_pca_components_unit_variance_and_variance_ratio_sums_to_one():
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(30, 12))
+    scores, explained_variance_ratio = pca_components(x, n_components=4)
+    assert scores.shape == (30, 4)
+    assert np.allclose(scores.std(axis=0), 1.0, atol=1e-6)
+    assert explained_variance_ratio.sum() == pytest.approx(1.0, abs=1e-6)
+    assert np.all(np.diff(explained_variance_ratio) <= 1e-10)  # sorted descending
+
+
+def test_pca_components_recovers_dominant_axis():
+    rng = np.random.default_rng(0)
+    dominant = rng.normal(scale=100.0, size=(200, 1)) @ rng.normal(size=(1, 5))
+    noise = rng.normal(scale=1e-3, size=(200, 5))
+    scores, explained_variance_ratio = pca_components(dominant + noise, n_components=1)
+    assert explained_variance_ratio[0] > 0.999
+    assert scores.shape == (200, 1)
+
+
+def test_make_axis_bases_is_seed_prefix_stable():
+    # A sweep over "how many axes to use" should never reshuffle bases
+    # already in play -- the first k bases must be identical regardless of
+    # how many total axes were requested.
+    few = make_axis_bases(2, d=32, seed=0)
+    many = make_axis_bases(5, d=32, seed=0)
+    for a, b in zip(few, many):
+        assert np.array_equal(a.values, b.values)
+
+
+def test_fpe_bundle_encode_single_axis_matches_plain_fpe():
+    scores = np.array([[0.5], [-1.2], [3.0]])
+    bases = make_axis_bases(1, d=16, seed=0)
+    content = fpe_bundle_encode(scores, bases, length_scale=1.0)
+    expected = np.stack([(bases[0] ** float(v)).values for v in scores[:, 0]])
+    assert np.allclose(content, expected, atol=1e-10)
+
+
+def test_fpe_bundle_encode_two_axes_matches_manual_bundle():
+    scores = np.array([[0.3, -0.7], [1.1, 2.4]])
+    bases = make_axis_bases(2, d=16, seed=0)
+    length_scale = 2.0
+    content = fpe_bundle_encode(scores, bases, length_scale)
+    expected = np.stack([
+        ((bases[0] ** float(scores[i, 0] / length_scale)).bundle(
+            bases[1] ** float(scores[i, 1] / length_scale))).values
+        for i in range(scores.shape[0])
+    ])
+    assert np.allclose(content, expected, atol=1e-10)
+
+
+def test_fpe_bundle_encode_shorter_length_scale_gives_narrower_kernel():
+    # Two frames with different score values should look *more* similar
+    # under a longer length scale (slower rotation per unit of score) --
+    # this is the whole point of the length-scale sweep in
+    # scripts/encoder_sweep.py, so pin the direction down explicitly.
+    scores = np.array([[0.0], [2.0]])
+    bases = make_axis_bases(1, d=64, seed=0)
+    narrow = fpe_bundle_encode(scores, bases, length_scale=0.25)
+    wide = fpe_bundle_encode(scores, bases, length_scale=4.0)
+    sim_narrow = phasor_correlation_matrix(narrow)[0, 1]
+    sim_wide = phasor_correlation_matrix(wide)[0, 1]
+    assert sim_wide > sim_narrow
+
+
+def test_pca_fpe_pipeline_more_components_improves_fidelity():
+    # Integration check that pca_components + fpe_bundle_encode +
+    # phasor_correlation_matrix + fidelity_score compose the way
+    # scripts/encoder_sweep.py assumes: on generic (no dominant-axis) data,
+    # keeping more components should preserve more of the raw similarity
+    # structure than keeping just one.
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(20, 30))
+    raw_corr = cosine_self_correlation(x)
+
+    def fidelity_with_k(k):
+        scores, _ = pca_components(x, k)
+        bases = make_axis_bases(k, d=64, seed=0)
+        content = fpe_bundle_encode(scores, bases, length_scale=1.0)
+        return fidelity_score(raw_corr, phasor_correlation_matrix(content))
+
+    assert fidelity_with_k(10) > fidelity_with_k(1)
