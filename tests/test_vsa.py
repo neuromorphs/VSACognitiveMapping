@@ -4,13 +4,17 @@ import torch
 
 from vsa_cognitive_mapping.vsa import (
     Phasor,
+    circular_similarity,
+    circular_wraparound_sweep,
     cosine_self_correlation,
     fidelity_score,
     fpe_bundle_encode,
     make_axis_bases,
+    neg_abs_diff,
     orthogonality_score,
     pca_components,
     phasor_correlation_matrix,
+    phasor_cross_correlation,
     random_project_to_phasor,
 )
 
@@ -166,6 +170,82 @@ def test_fpe_bundle_encode_shorter_length_scale_gives_narrower_kernel():
     sim_narrow = phasor_correlation_matrix(narrow)[0, 1]
     sim_wide = phasor_correlation_matrix(wide)[0, 1]
     assert sim_wide > sim_narrow
+
+
+def test_circular_base_is_unit_modulus_and_seed_stable():
+    a = Phasor(dim=64, seed=0, circular=True)
+    b = Phasor(dim=64, seed=0, circular=True)
+    assert np.allclose(np.abs(a.values), 1.0, atol=1e-10)
+    assert np.array_equal(a.values, b.values)
+
+
+def test_circular_base_wraps_exactly_after_one_turn():
+    # The defining property: base**(angle + 2*pi) == base**angle, because
+    # every dimension's phase is an integer number of radians.
+    base = Phasor(dim=64, seed=0, circular=True)
+    assert (base ** 0.7).similarity(base ** (0.7 + 2 * np.pi)) == pytest.approx(1.0, abs=1e-8)
+
+
+def test_continuous_base_does_not_wrap_after_one_turn():
+    # Contrast case: an ordinary continuous-random-phase base generically
+    # does *not* return to the same phasor after a full 2*pi turn -- this is
+    # exactly the defect circular=True fixes for a periodic scalar like yaw.
+    base = Phasor(dim=64, seed=0)
+    sim = (base ** 0.7).similarity(base ** (0.7 + 2 * np.pi))
+    assert sim < 0.999
+
+
+def test_circular_wraparound_sweep_matches_ground_truth_for_max_freq_one():
+    # max_freq=1 -> every dimension is +-1, and cos(+-angle) == cos(angle),
+    # so the encoded curve collapses to exactly the ground-truth cos(angle).
+    base = Phasor(dim=128, seed=0, circular=True, max_freq=1)
+    _, ground_truth, encoded = circular_wraparound_sweep(base, n_points=25)
+    assert np.allclose(encoded, ground_truth, atol=1e-6)
+
+
+def test_circular_wraparound_sweep_is_periodic_and_symmetric_for_mixed_frequencies():
+    # With max_freq > 1, mixing harmonics per dimension no longer traces
+    # exactly cos(angle) (each dim contributes cos(k*angle) for its own k),
+    # but two properties must still hold for *any* integer frequency mix:
+    # exact 2*pi periodicity, and symmetry (cos is even in angle).
+    base = Phasor(dim=128, seed=0, circular=True, max_freq=3)
+    angles, _, encoded = circular_wraparound_sweep(base, n_points=25)
+    mid = len(angles) // 2
+    assert angles[mid] == pytest.approx(0.0)
+    assert encoded[mid] == pytest.approx(1.0, abs=1e-8)          # base**0 vs itself
+    assert encoded[0] == pytest.approx(encoded[-1], abs=1e-8)    # -2*pi == +2*pi
+    assert np.allclose(encoded, encoded[::-1], atol=1e-8)        # even in angle
+
+
+def test_circular_wraparound_sweep_diverges_for_continuous_base_past_one_period():
+    base = Phasor(dim=128, seed=0)
+    angles, ground_truth, encoded = circular_wraparound_sweep(base, n_points=25)
+    past_one_period = np.abs(angles) > np.pi
+    assert not np.allclose(encoded[past_one_period], ground_truth[past_one_period], atol=1e-2)
+
+
+def test_circular_similarity_matches_manual_cosine():
+    angle = np.array([0.0, np.pi, np.pi / 2])
+    corr = circular_similarity(angle)
+    assert corr.shape == (3, 3)
+    assert np.allclose(np.diag(corr), 1.0, atol=1e-10)
+    assert corr[0, 1] == pytest.approx(-1.0, abs=1e-10)  # 0 vs pi: opposite headings
+
+
+def test_neg_abs_diff_diagonal_is_zero_and_symmetric():
+    x = np.array([0.0, 5.0, 2.0])
+    d = neg_abs_diff(x)
+    assert np.allclose(np.diag(d), 0.0)
+    assert np.allclose(d, d.T)
+    assert d[0, 1] == pytest.approx(-5.0)
+
+
+def test_phasor_cross_correlation_self_case_matches_phasor_correlation_matrix():
+    torch.manual_seed(0)
+    x = torch.randn(6, 32)
+    z, _ = random_project_to_phasor(x, d=16, seed=0)
+    z_np = z.numpy()
+    assert np.allclose(phasor_cross_correlation(z_np, z_np), phasor_correlation_matrix(z_np), atol=1e-10)
 
 
 def test_pca_fpe_pipeline_more_components_improves_fidelity():

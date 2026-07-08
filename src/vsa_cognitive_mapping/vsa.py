@@ -26,11 +26,41 @@ import torch
 class Phasor:
     """Unit-modulus complex vector in C^dim, with VSA bind/bundle/FPE ops."""
 
+    # For circular=True: the largest integer frequency that survives being
+    # stored as a point on the unit circle. `values ** exponent` is computed
+    # via numpy's principal-branch `exp(exponent * log(values))`, and
+    # `log(exp(1j*k))` only recovers `k` itself when `|k| <= pi` -- past
+    # that, `exp(1j*k)` is indistinguishable from its wrapped equivalent
+    # (e.g. k=5 silently becomes -1.283, which is not an integer), so a
+    # larger max_freq would defeat the whole point.
+    _MAX_CIRCULAR_FREQ = 3
+
     def __init__(self, dim: int | None = None, seed: int | None = None,
-                 data: np.ndarray | None = None):
+                 data: np.ndarray | None = None, circular: bool = False, max_freq: int = 3):
         if data is not None:
             self.values = data
             self.dim = data.shape[0]
+        elif circular:
+            # For a periodic scalar (e.g. yaw), `base**angle` is only
+            # circular-safe -- `base**(angle + 2*pi) == base**angle` -- if
+            # each dimension's phase is an *integer* number of radians: only
+            # then is phase * 2*pi a multiple of 2*pi, so the exponent
+            # wrapping by a full turn brings the phasor back to where it
+            # started. The continuous-uniform-phase branch below generically
+            # gives non-integer phases, so it does not wrap correctly (see
+            # `circular_wraparound_sweep` for a diagnostic). Nonzero random
+            # integer frequencies, capped at _MAX_CIRCULAR_FREQ, keep every
+            # dimension circular-safe while still giving a distributed,
+            # seeded, non-degenerate code.
+            if max_freq > self._MAX_CIRCULAR_FREQ:
+                raise ValueError(f"max_freq={max_freq} exceeds {self._MAX_CIRCULAR_FREQ} "
+                                 "(floor(pi)) -- larger integer frequencies are not "
+                                 "recoverable from a unit-circle point and silently lose "
+                                 "circular safety")
+            freqs = np.random.RandomState(seed).randint(-max_freq, max_freq + 1, dim)
+            freqs[freqs == 0] = 1
+            self.values = np.exp(1j * freqs)
+            self.dim = dim
         else:
             phases = np.random.RandomState(seed).uniform(0, 2 * np.pi, dim)
             self.values = np.exp(1j * phases)
@@ -137,10 +167,80 @@ def phasor_correlation_matrix(phasors: np.ndarray, eps: float = 1e-8) -> np.ndar
     return np.real(phasors_unit @ phasors_unit.conj().T)
 
 
+def phasor_cross_correlation(a: np.ndarray, b: np.ndarray, eps: float = 1e-8) -> np.ndarray:
+    """Pairwise normalized correlation between two (possibly different) sets
+    of complex phasors -- e.g. checking whether one axis's HD code (time)
+    leaks structure into another's (heading) before they get bound together
+    into a shared associative-memory trace. `phasor_correlation_matrix` is
+    the special case `a is b`.
+
+    Args:
+        a: complex array (N, d)
+        b: complex array (N, d)
+
+    Returns:
+        (N, N) real correlation matrix
+    """
+    a_unit = a / (np.linalg.norm(a, axis=1, keepdims=True) + eps)
+    b_unit = b / (np.linalg.norm(b, axis=1, keepdims=True) + eps)
+    return np.real(a_unit @ b_unit.conj().T)
+
+
 def cosine_self_correlation(x: np.ndarray, eps: float = 1e-8) -> np.ndarray:
     """(N, D) real vectors -> (N, N) pairwise cosine similarity against themselves."""
     x_unit = x / (np.linalg.norm(x, axis=-1, keepdims=True) + eps)
     return x_unit @ x_unit.T
+
+
+def circular_similarity(angle: np.ndarray) -> np.ndarray:
+    """(N,) angles in radians -> (N, N) pairwise cos(angle_i - angle_j), the
+    circular-aware analogue of `cosine_self_correlation` -- the ground-truth
+    reference to score a periodic quantity like yaw against, since e.g.
+    -pi+eps and pi-eps are almost the same heading but far apart as raw
+    numbers."""
+    diff = angle[:, None] - angle[None, :]
+    return np.cos(diff)
+
+
+def neg_abs_diff(x: np.ndarray) -> np.ndarray:
+    """(N,) scalars -> (N, N) pairwise -|x_i - x_j|, a ground-truth reference
+    for an unbounded ramp-like quantity (e.g. frame index / timestamp) where
+    only the monotonic neighbor structure matters to `fidelity_score`'s
+    Pearson correlation, not absolute scale."""
+    return -np.abs(x[:, None] - x[None, :])
+
+
+def circular_wraparound_sweep(base: Phasor, n_points: int = 361) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Diagnostic for whether an FPE base is circular-safe: hold a reference
+    angle at 0 and sweep a query angle across *two full turns*
+    ([-2*pi, 2*pi]), comparing `base**query` similarity against the
+    ground-truth `cos(query)`.
+
+    A `circular=True` base is always exactly periodic every 2*pi and
+    symmetric about 0 (both guaranteed since each dimension contributes
+    cos(k*angle) for its own integer frequency k). With `max_freq=1` every
+    dimension collapses to plain cos(angle), so `encoded` matches
+    `ground_truth` exactly. With `max_freq>1`, mixing harmonics gives a
+    sharper (and generally non-monotonic) curve that no longer equals
+    ground truth point-for-point -- trading fidelity to the raw angular
+    distance for a more distinguishable code, the same fidelity/orthogonality
+    tradeoff `length_scale` makes for the non-circular FPE axes.
+
+    An ordinary continuous-random-phase base has neither guarantee: it
+    drifts and does not repeat, which shows up as a visible mismatch (from
+    either ground_truth or from itself one period over) anywhere past
+    +/-pi.
+
+    Returns:
+        angles: (n_points,) sweep of the query angle, radians
+        ground_truth: (n_points,) cos(angle), the correct circular similarity
+        encoded: (n_points,) base**angle similarity to base**0
+    """
+    angles = np.linspace(-2 * np.pi, 2 * np.pi, n_points)
+    reference = base ** 0.0
+    ground_truth = np.cos(angles)
+    encoded = np.array([reference.similarity(base ** float(a)) for a in angles])
+    return angles, ground_truth, encoded
 
 
 def _upper_triangle(mat: np.ndarray) -> np.ndarray:

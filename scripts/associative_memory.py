@@ -29,6 +29,36 @@ Phase 2 stops at "build and save the trace." For how to query it back out
 candidates), see the "Associative Memory 1/2" sections of
 notebooks/loading_sample_blender_data.ipynb — the same pattern applies here.
 
+Phase 2b — encoding fidelity: before phase 2's choices get baked into a
+trace (and before that trace is combined with the JEPA content vectors),
+checks each axis's HD encoding on its own terms:
+
+    python scripts/associative_memory.py phase2b --embeddings checkpoints/jepa_sim/embeddings.pt --split train --root data/dataset_vjepa_bezier
+
+For each of time (frame_t), position (x, y), heading (yaw), and action
+(one-hot forward/stop/left/right), encodes the channel into HD space and
+compares its pairwise phasor-similarity matrix against a domain-appropriate
+ground-truth reference (fidelity_score), plus how mutually orthogonal the
+encoded vectors are (orthogonality_score) — the same evaluation
+`scripts/encoder_sweep.py` runs for z_t, applied instead to the axes phase 2
+binds around it. Position and time reuse ordinary FPE (Bx/By/Bt), which is a
+good fit for open, unbounded scalars. Heading is different: yaw is periodic,
+and FPE with a random-phase base is *not* circular-safe (`base**angle`
+doesn't return to the same phasor at `angle + 2*pi` unless the base's phase
+happens to be an integer number of radians) — so heading uses
+`Phasor(..., circular=True)`, and this phase also renders a wraparound-sweep
+plot showing exactly where a naive continuous-phase base breaks down
+relative to the circular-safe one and ground truth. Action is categorical
+rather than a scalar, so instead of FPE it gets one fixed random Phasor per
+label from a small codebook, scored against a ground-truth reference where
+same-action pairs are 1 and different-action pairs are 0 (one-hot vectors
+are already mutually orthogonal). If `--root` is given, also scores the
+per-transition pose-change deltas (dx/dy/dz_world, dist_ground, dyaw) the
+same way. Finally, prints a cross-channel leakage check between the axis
+codes themselves (time vs. position vs. heading vs. action) — are the
+independently-bound axes actually independent, or does one leak structure
+into another before they're bound together.
+
 Phase 3 — validate data loading: sanity-check plots for the pose, heading,
 and delta data that phases 1/2 rely on, split by train/val, so a bad
 frame_t/pos_t alignment or a lopsided split shows up before it's baked into
@@ -40,12 +70,26 @@ checked.
 import argparse
 from pathlib import Path
 
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
 from vsa_cognitive_mapping.data import ACTIONS, load_deltas_by_transition
-from vsa_cognitive_mapping.vsa import Phasor, random_project_to_phasor
+from vsa_cognitive_mapping.vsa import (
+    Phasor,
+    circular_similarity,
+    circular_wraparound_sweep,
+    cosine_self_correlation,
+    fidelity_score,
+    fpe_bundle_encode,
+    make_axis_bases,
+    neg_abs_diff,
+    orthogonality_score,
+    phasor_correlation_matrix,
+    phasor_cross_correlation,
+    random_project_to_phasor,
+)
 
 # Fixed categorical identity: train is always blue, val is always orange,
 # across every plot in this file (see dataviz skill — color follows the
@@ -54,6 +98,9 @@ TRAIN_COLOR = "#2a78d6"
 VAL_COLOR = "#eb6834"
 GRID_COLOR = "#e1e0d9"
 MUTED_COLOR = "#898781"
+# Fidelity is a correlation coefficient (signed, [-1, 1]) -> diverging, same
+# palette scripts/encoder_sweep.py uses for its own correlation-comparison plots.
+DIVERGING_CMAP = mcolors.LinearSegmentedColormap.from_list("blue_gray_red", ["#2a78d6", "#f0efec", "#e34948"])
 
 
 def _style_axis(ax) -> None:
@@ -169,6 +216,177 @@ def phase2_build_memory(embeddings_path: str, split: str, hd_dim: int, out_path:
     torch.save(result, out_path)
     print(f"memory trace over {result['n_frames']} frames ({split}) written to {out_path}")
     return out_path
+
+
+# ---------------------------------------------------------------------------
+# Phase 2b: encoding fidelity — time, position, heading, pose-change deltas
+# ---------------------------------------------------------------------------
+
+def encode_time(frame_t: np.ndarray, hd_dim: int, seed: int, length_scale: float) -> np.ndarray:
+    base = Phasor(dim=hd_dim, seed=seed)
+    return np.stack([(base ** float(t / length_scale)).values for t in frame_t])
+
+
+def encode_position(xy: np.ndarray, hd_dim: int, x_seed: int, y_seed: int, length_scale: float) -> np.ndarray:
+    Bx = Phasor(dim=hd_dim, seed=x_seed)
+    By = Phasor(dim=hd_dim, seed=y_seed)
+    return np.stack([
+        ((Bx ** float(x / length_scale)) * (By ** float(y / length_scale))).values
+        for x, y in xy
+    ])
+
+
+def encode_heading(yaw: np.ndarray, hd_dim: int, seed: int, max_freq: int) -> np.ndarray:
+    """FPE with `circular=True`, not an ordinary Phasor base -- see the
+    Phase 2b module docstring and `Phasor.__init__`'s `circular` branch for
+    why a plain random-phase base isn't safe for a periodic scalar."""
+    base = Phasor(dim=hd_dim, seed=seed, circular=True, max_freq=max_freq)
+    return np.stack([(base ** float(a)).values for a in yaw])
+
+
+def encode_action(action_onehot: np.ndarray, hd_dim: int, seed: int) -> np.ndarray:
+    """Action (see `ACTIONS`) is categorical, not continuous like time/
+    position/heading -- there's no scalar to raise a base to, so each label
+    gets its own independent random Phasor from a small codebook (one entry
+    per column of the one-hot), looked up by the active label per row."""
+    codebook = make_axis_bases(action_onehot.shape[1], hd_dim, seed=seed)
+    labels = action_onehot.argmax(axis=1)
+    return np.stack([codebook[label].values for label in labels])
+
+
+def plot_encoding_fidelity(ref_corr: np.ndarray, vsa_corr: np.ndarray, fidelity: float,
+                           orthogonality: float, title: str, out_path: Path) -> Path:
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5), constrained_layout=True)
+    for ax, corr, subtitle in ((axes[0], ref_corr, "ground truth"), (axes[1], vsa_corr, "VSA content (phasor)")):
+        im = ax.imshow(corr, vmin=-1, vmax=1, cmap=DIVERGING_CMAP)
+        ax.set_xlabel("frame")
+        ax.set_ylabel("frame")
+        ax.set_title(subtitle)
+        fig.colorbar(im, ax=ax, label="similarity")
+    fig.suptitle(f"{title}\nfidelity={fidelity:.3f}  orthogonality={orthogonality:.3f}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return out_path
+
+
+def plot_yaw_wraparound_demo(hd_dim: int, seed: int, max_freq: int, out_path: Path) -> Path:
+    """Visualizes exactly why yaw needs a circular-safe base: sweep a query
+    angle across two full turns against a fixed reference of 0, comparing
+    ground-truth cos(angle), an ordinary continuous-phase base (which drifts
+    and does not repeat past +/-pi), and the circular-safe base actually
+    used by `encode_heading`."""
+    continuous_base = Phasor(dim=hd_dim, seed=seed)
+    circular_base = Phasor(dim=hd_dim, seed=seed, circular=True, max_freq=max_freq)
+
+    angles, ground_truth, continuous_encoded = circular_wraparound_sweep(continuous_base)
+    _, _, circular_encoded = circular_wraparound_sweep(circular_base)
+
+    fig, ax = plt.subplots(figsize=(7.5, 4.5), constrained_layout=True)
+    ax.plot(angles, ground_truth, color=MUTED_COLOR, linewidth=2, linestyle="--", label="ground truth: cos(angle)")
+    ax.plot(angles, continuous_encoded, color=VAL_COLOR, linewidth=1.5, label="continuous-phase base (naive FPE)")
+    ax.plot(angles, circular_encoded, color=TRAIN_COLOR, linewidth=1.5, label=f"circular=True base (max_freq={max_freq})")
+    for boundary in (-np.pi, np.pi):
+        ax.axvline(boundary, color=GRID_COLOR, linewidth=1, zorder=0)
+    ax.set_xlabel("query angle (radians), reference fixed at 0")
+    ax.set_ylabel("similarity to reference")
+    ax.set_title("Why yaw needs a circular-safe base — similarity vs. angle, two full turns")
+    ax.legend(frameon=False, fontsize=8)
+    _style_axis(ax)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    return out_path
+
+
+def phase2b_encoding_fidelity(embeddings_path: str, split: str, hd_dim: int, out_dir: str | Path,
+                              time_seed: int, x_seed: int, y_seed: int, yaw_seed: int, action_seed: int,
+                              length_scale: float, yaw_max_freq: int,
+                              root: str | Path | None = None) -> dict[str, Path]:
+    data = torch.load(embeddings_path)[split]
+    if data["pos_t"] is None:
+        raise ValueError(f"{embeddings_path!r} split {split!r} has no position data — "
+                         "re-run eval.py --save-embeddings on a dataset with transitions.csv")
+
+    out_dir = Path(out_dir)
+    frame_t = data["frame_t"].numpy().astype(np.float64)
+    pos_t = data["pos_t"].numpy()
+    xy, yaw = pos_t[:, :2], pos_t[:, 3]
+
+    codes: dict[str, np.ndarray] = {}
+    paths: dict[str, Path] = {}
+
+    # --- time ---
+    codes["time"] = encode_time(frame_t, hd_dim, time_seed, length_scale)
+    ref = neg_abs_diff(frame_t)
+    vsa_corr = phasor_correlation_matrix(codes["time"])
+    fid, orth = fidelity_score(ref, vsa_corr), orthogonality_score(vsa_corr)
+    paths["time"] = plot_encoding_fidelity(ref, vsa_corr, fid, orth, f"Time encoding ({split})",
+                                           out_dir / f"validate_encoding_time_{split}.png")
+    print(f"[time] fidelity={fid:.3f} orthogonality={orth:.3f}")
+
+    # --- position ---
+    codes["position"] = encode_position(xy, hd_dim, x_seed, y_seed, length_scale)
+    ref = cosine_self_correlation(xy)
+    vsa_corr = phasor_correlation_matrix(codes["position"])
+    fid, orth = fidelity_score(ref, vsa_corr), orthogonality_score(vsa_corr)
+    paths["position"] = plot_encoding_fidelity(ref, vsa_corr, fid, orth, f"Position encoding ({split})",
+                                               out_dir / f"validate_encoding_position_{split}.png")
+    print(f"[position] fidelity={fid:.3f} orthogonality={orth:.3f}")
+
+    # --- heading (yaw) ---
+    codes["heading"] = encode_heading(yaw, hd_dim, yaw_seed, yaw_max_freq)
+    ref = circular_similarity(yaw)
+    vsa_corr = phasor_correlation_matrix(codes["heading"])
+    fid, orth = fidelity_score(ref, vsa_corr), orthogonality_score(vsa_corr)
+    paths["heading"] = plot_encoding_fidelity(ref, vsa_corr, fid, orth, f"Heading (yaw) encoding ({split})",
+                                              out_dir / f"validate_encoding_heading_{split}.png")
+    print(f"[heading] fidelity={fid:.3f} orthogonality={orth:.3f}")
+
+    paths["heading_wraparound"] = plot_yaw_wraparound_demo(
+        hd_dim, yaw_seed, yaw_max_freq, out_dir / f"validate_encoding_heading_wraparound_{split}.png")
+
+    # --- action ---
+    action_onehot = data["action"].numpy()
+    codes["action"] = encode_action(action_onehot, hd_dim, action_seed)
+    ref = cosine_self_correlation(action_onehot.astype(np.float64))
+    vsa_corr = phasor_correlation_matrix(codes["action"])
+    fid, orth = fidelity_score(ref, vsa_corr), orthogonality_score(vsa_corr)
+    paths["action"] = plot_encoding_fidelity(ref, vsa_corr, fid, orth, f"Action encoding ({split})",
+                                             out_dir / f"validate_encoding_action_{split}.png")
+    print(f"[action] fidelity={fid:.3f} orthogonality={orth:.3f}")
+
+    # --- pose-change deltas (optional) ---
+    if root is not None:
+        delta_t = load_deltas_for_split(root, data["frame_t"], data["frame_tp1"])
+        if delta_t is None:
+            print(f"note: no transitions.csv under {root} — skipping delta encoding fidelity")
+        else:
+            delta_np = delta_t.numpy()
+            delta_std = (delta_np - delta_np.mean(axis=0, keepdims=True)) / (delta_np.std(axis=0, keepdims=True) + 1e-8)
+            bases = make_axis_bases(delta_np.shape[1], hd_dim, seed=x_seed)
+            codes["deltas"] = fpe_bundle_encode(delta_std, bases, length_scale)
+            ref = cosine_self_correlation(delta_np)
+            vsa_corr = phasor_correlation_matrix(codes["deltas"])
+            fid, orth = fidelity_score(ref, vsa_corr), orthogonality_score(vsa_corr)
+            paths["deltas"] = plot_encoding_fidelity(ref, vsa_corr, fid, orth, f"Pose-change (delta) encoding ({split})",
+                                                     out_dir / f"validate_encoding_deltas_{split}.png")
+            print(f"[deltas] fidelity={fid:.3f} orthogonality={orth:.3f}")
+    else:
+        print("note: no --root given — skipping delta encoding fidelity")
+
+    # --- cross-channel leakage: do the independently-bound axes interfere? ---
+    print("cross-channel leakage (mean |cross-correlation| between axis codes; lower = more independent):")
+    axis_names = [name for name in ("time", "position", "heading", "action") if name in codes]
+    for i, name_a in enumerate(axis_names):
+        for name_b in axis_names[i + 1:]:
+            cross = phasor_cross_correlation(codes[name_a], codes[name_b])
+            leakage = float(np.abs(cross).mean())
+            print(f"  [{name_a} vs {name_b}] mean|cross-corr|={leakage:.3f}")
+
+    for path in paths.values():
+        print(f"wrote {path}")
+    return paths
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +606,26 @@ if __name__ == "__main__":
                          "gt deltas (dx/dy/dz_world, dist_ground, dyaw_rad/deg) are loaded "
                          "and saved alongside the memory trace as 'delta_t'")
 
+    p2b = sub.add_parser("phase2b", help="fidelity/orthogonality of time, position, heading, and delta HD encodings")
+    p2b.add_argument("--embeddings", required=True)
+    p2b.add_argument("--split", choices=["train", "val"], default="train")
+    p2b.add_argument("--hd-dim", type=int, default=256)
+    p2b.add_argument("--out-dir", default=None, help="default: <embeddings dir>/plots")
+    p2b.add_argument("--time-seed", type=int, default=42)
+    p2b.add_argument("--x-seed", type=int, default=1)
+    p2b.add_argument("--y-seed", type=int, default=2)
+    p2b.add_argument("--yaw-seed", type=int, default=3)
+    p2b.add_argument("--action-seed", type=int, default=4)
+    p2b.add_argument("--length-scale", type=float, default=1.0,
+                     help="FPE length scale for time/position/delta encoders "
+                          "(heading uses circular=True instead, no length_scale)")
+    p2b.add_argument("--yaw-max-freq", type=int, default=3,
+                     help="max |integer frequency| for the circular-safe heading base "
+                          "(hard ceiling of 3 == floor(pi); see Phasor.__init__)")
+    p2b.add_argument("--root", default=None,
+                     help="dataset root containing transitions.csv; if given, also evaluates "
+                          "delta_t (dx/dy/dz_world, dist_ground, dyaw) encoding fidelity")
+
     p3 = sub.add_parser("phase3", help="validate pose/heading/delta loading, train vs val, as PNGs")
     p3.add_argument("--embeddings", required=True)
     p3.add_argument("--out-dir", default=None, help="default: <embeddings dir>/plots")
@@ -404,6 +642,11 @@ if __name__ == "__main__":
         phase2_build_memory(args.embeddings, args.split, args.hd_dim, out,
                             args.content_seed, args.time_seed, args.x_seed, args.y_seed,
                             root=args.root)
+    elif args.phase == "phase2b":
+        out_dir = args.out_dir or Path(args.embeddings).parent / "plots"
+        phase2b_encoding_fidelity(args.embeddings, args.split, args.hd_dim, out_dir,
+                                  args.time_seed, args.x_seed, args.y_seed, args.yaw_seed, args.action_seed,
+                                  args.length_scale, args.yaw_max_freq, root=args.root)
     else:
         out_dir = args.out_dir or Path(args.embeddings).parent / "plots"
         phase3_validate_data(args.embeddings, out_dir, root=args.root)
