@@ -11,9 +11,13 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy",
     "matplotlib",
+    "pandas",
+    "pyyaml",
+    "pillow",
 ]
 
 [project.optional-dependencies]
+dev = ["pytest"]
 notebook = [
     "jupyter",
     "ipykernel",
@@ -25,3 +29,7 @@ detection = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vsa_cognitive_mapping"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: tests that run real training steps or need network access"]
