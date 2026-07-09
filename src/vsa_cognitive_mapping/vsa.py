@@ -186,6 +186,28 @@ def phasor_cross_correlation(a: np.ndarray, b: np.ndarray, eps: float = 1e-8) ->
     return np.real(a_unit @ b_unit.conj().T)
 
 
+def best_matches(query: np.ndarray, codebook: np.ndarray, k: int = 1,
+                 eps: float = 1e-8) -> tuple[np.ndarray, np.ndarray]:
+    """Cleanup memory: given a (possibly noisy, e.g. just-unbound) phasor and
+    a codebook of candidate phasors, return the indices and similarities of
+    the k best-matching codebook rows -- the "which stored item does this
+    most resemble" step every associative-memory recall ends with, using the
+    same normalized real-inner-product definition as
+    phasor_correlation_matrix/Phasor.similarity.
+
+    Args:
+        query: complex array (d,)
+        codebook: complex array (N, d)
+
+    Returns:
+        indices: (k,) int, descending by similarity
+        similarities: (k,) float, query's similarity to each returned row
+    """
+    sims = phasor_cross_correlation(query[None, :], codebook, eps=eps)[0]
+    order = np.argsort(sims)[::-1][:k]
+    return order, sims[order]
+
+
 def cosine_self_correlation(x: np.ndarray, eps: float = 1e-8) -> np.ndarray:
     """(N, D) real vectors -> (N, N) pairwise cosine similarity against themselves."""
     x_unit = x / (np.linalg.norm(x, axis=-1, keepdims=True) + eps)

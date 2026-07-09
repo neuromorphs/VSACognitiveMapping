@@ -4,6 +4,7 @@ import torch
 
 from vsa_cognitive_mapping.vsa import (
     Phasor,
+    best_matches,
     circular_similarity,
     circular_wraparound_sweep,
     cosine_self_correlation,
@@ -246,6 +247,41 @@ def test_phasor_cross_correlation_self_case_matches_phasor_correlation_matrix():
     z, _ = random_project_to_phasor(x, d=16, seed=0)
     z_np = z.numpy()
     assert np.allclose(phasor_cross_correlation(z_np, z_np), phasor_correlation_matrix(z_np), atol=1e-10)
+
+
+def test_best_matches_recovers_bundled_item_after_unbind():
+    # The full associative-memory recall round trip: bind each item's
+    # content to its own context key, bundle every (content * context) trace
+    # into one memory, then for each item unbind the memory by that item's
+    # context -- best_matches should identify that item's own content as the
+    # closest match in the codebook, not some other item's.
+    dim = 512
+    n_items = 5
+    content = [Phasor(dim=dim, seed=10 + i) for i in range(n_items)]
+    context = [Phasor(dim=dim, seed=20 + i) for i in range(n_items)]
+
+    traces = [c.bind(k) for c, k in zip(content, context)]
+    memory = traces[0].bundle(traces[1:])
+    codebook = np.stack([c.values for c in content])
+
+    for i in range(n_items):
+        residual = memory.unbind(context[i])
+        indices, similarities = best_matches(residual.values, codebook, k=2)
+        # Correct item ranks first, with a clear margin over the runner-up --
+        # not just barely ahead of bundling noise from the other 4 items.
+        assert indices[0] == i
+        assert similarities[0] - similarities[1] > 0.1
+
+
+def test_best_matches_orders_by_descending_similarity():
+    dim = 256
+    codebook = np.stack([Phasor(dim=dim, seed=i).values for i in range(4)])
+    query = Phasor(dim=dim, seed=2).values  # exact match to codebook row 2
+
+    indices, similarities = best_matches(query, codebook, k=4)
+    assert indices[0] == 2
+    assert similarities[0] > 0.999
+    assert np.all(np.diff(similarities) <= 1e-10)
 
 
 def test_pca_fpe_pipeline_more_components_improves_fidelity():
