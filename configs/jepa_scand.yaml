@@ -1,0 +1,38 @@
+# JEPA world model on real SCAND indoor Spot trajectories (10 bags, 5 UT
+# buildings, actions derived from odometry — see scripts/scand_to_transitions.py).
+# The val tail of the merged CSV falls on the last bags (B_SAC_*), so
+# validation is (mostly) held-out trajectories.
+seed: 0
+device: cpu
+
+data:
+  root: data/scand_indoor
+  val_fraction: 0.15
+  img_size: 224        # multiple of DINOv2's patch size 14
+  frame_skip: 1        # converter subsamples to 6 Hz (~0.23 m per forward step,
+                       # displacement-matched to run1 at 2.5 Hz)
+
+model:
+  backbone: dinov2_vits14
+  backbone_dim: 384
+  latent_dim: 128
+  lam: 0.1             # SIGReg weight (LeWorldModel default)
+  predictor:
+    kind: mlp
+    hidden_dim: 256
+    action_embed_dim: 32
+  sigreg:
+    num_projections: 256
+    knots: 17
+    t_max: 3.0
+
+train:
+  epochs: 60           # 6 Hz doubles the data; ~same optimizer steps as 100 @ 3 Hz
+  batch_size: 32
+  lr: 1.0e-3
+  weight_decay: 0.01
+  warmup_steps: 100
+  grad_clip: 1.0
+  log_every: 50
+  checkpoint_every_epochs: 20
+  out_dir: checkpoints/jepa_scand

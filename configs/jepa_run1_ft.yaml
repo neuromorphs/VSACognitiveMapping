@@ -1,0 +1,39 @@
+# Finetune (or evaluate) on the real Telluride run1 recording. Train split is
+# the first 30% of the run; the last 70% is the shared test set for all three
+# variants (SCAND zero-shot, SCAND->run1 finetune, run1 from-scratch).
+#
+#   finetune:  train.py --config this --init checkpoints/jepa_scand/final.pt
+#   zero-shot: eval.py  --config this --checkpoint checkpoints/jepa_scand/final.pt
+seed: 0
+device: cpu
+
+data:
+  root: data/spot_run1
+  val_fraction: 0.7
+  img_size: 224
+  frame_skip: 1
+
+model:
+  backbone: dinov2_vits14
+  backbone_dim: 384
+  latent_dim: 128
+  lam: 0.1
+  predictor:
+    kind: mlp
+    hidden_dim: 256
+    action_embed_dim: 32
+  sigreg:
+    num_projections: 256
+    knots: 17
+    t_max: 3.0
+
+train:
+  epochs: 150          # ~75 train transitions -> 2-3 steps/epoch
+  batch_size: 32
+  lr: 3.0e-4           # gentler than from-scratch: we start from SCAND weights
+  weight_decay: 0.01
+  warmup_steps: 20
+  grad_clip: 1.0
+  log_every: 20
+  checkpoint_every_epochs: 50
+  out_dir: checkpoints/jepa_run1_ft

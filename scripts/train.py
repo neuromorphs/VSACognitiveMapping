@@ -50,7 +50,7 @@ def warmup_cosine(warmup_steps: int, total_steps: int):
     return fn
 
 
-def train(cfg: dict, resume: str | None = None) -> Path:
+def train(cfg: dict, resume: str | None = None, init: str | None = None) -> Path:
     seed_everything(cfg["seed"])
     device = cfg.get("device", "cpu")
     data_cfg, model_cfg, train_cfg = cfg["data"], cfg["model"], cfg["train"]
@@ -67,6 +67,10 @@ def train(cfg: dict, resume: str | None = None) -> Path:
                         generator=torch.Generator().manual_seed(cfg["seed"]))
 
     model = JEPAWorldModel.from_config(model_cfg).to(device)
+    if init is not None:  # warm start (e.g. finetuning): weights only, fresh optimizer
+        state = torch.load(init, map_location=device)
+        model.load_state_dict(state["model"] if "model" in state else state)
+        print(f"initialized weights from {init}")
     optimizer = torch.optim.AdamW(param_groups(model, train_cfg.get("weight_decay", 0.01)),
                                   lr=train_cfg["lr"])
     total_steps = len(loader) * train_cfg["epochs"]
@@ -123,6 +127,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--resume", default=None)
+    parser.add_argument("--init", default=None,
+                        help="checkpoint to initialize weights from (fresh optimizer; for finetuning)")
     args = parser.parse_args()
     with open(args.config) as f:
-        train(yaml.safe_load(f), resume=args.resume)
+        train(yaml.safe_load(f), resume=args.resume, init=args.init)
