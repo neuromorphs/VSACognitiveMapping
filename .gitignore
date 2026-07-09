@@ -2,6 +2,8 @@
 ./SpatialAwareRobotDataset
 notebooks/models/
 dataset_vjepa_bezier
+outputs/
+**/.DS_Store
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -232,3 +234,4 @@ data/
 notes/
 CLAUDE.md
 TASKS.md
+yolov8n.pt
