@@ -22,9 +22,15 @@ notebook = [
     "jupyter",
     "ipykernel",
     "pillow",
+    "datasets",
 ]
 detection = [
     "ultralytics",
+]
+# converters for real-robot data (SCAND rosbags, HF spot-telluride run1)
+data = [
+    "rosbags",
+    "datasets",
 ]
 
 [tool.hatch.build.targets.wheel]
