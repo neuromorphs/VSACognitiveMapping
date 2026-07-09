@@ -26,6 +26,9 @@ notebook = [
 detection = [
     "ultralytics",
 ]
+hf = [
+    "datasets",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vsa_cognitive_mapping"]
