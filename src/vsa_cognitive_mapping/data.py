@@ -69,8 +69,10 @@ def load_pose_by_frame(root: str | Path) -> dict[int, tuple[float, float, float,
         return None
     df = pd.read_csv(path)
     pose = {int(row.frame_t): (row.x_t, row.y_t, row.z_t, row.yaw_t_rad) for row in df.itertuples()}
-    last = df.iloc[-1]
-    pose[int(last["frame_tp1"])] = (last["x_tp1"], last["y_tp1"], last["z_tp1"], last["yaw_tp1_rad"])
+    # frame_tp1 poses cover each trajectory's final frame (multi-trajectory
+    # CSVs have one such frame per trajectory, not just the global last row)
+    pose.update({int(row.frame_tp1): (row.x_tp1, row.y_tp1, row.z_tp1, row.yaw_tp1_rad)
+                 for row in df.itertuples()})
     return pose
 
 

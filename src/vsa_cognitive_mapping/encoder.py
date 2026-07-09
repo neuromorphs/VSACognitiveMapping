@@ -58,7 +58,10 @@ def build_embedding_cache(root: str | Path, backbone: nn.Module, backbone_name: 
     for i in range(0, len(paths), batch_size):
         batch = paths[i:i + batch_size]
         imgs = torch.stack([load_image(root / p, img_size) for p in batch]).to(device)
-        embs = backbone(imgs).cpu()
+        # .clone(): the CLS embedding is a view into the full 257-token tensor,
+        # and torch.save would otherwise persist every view's whole storage
+        # (~80x cache bloat on disk and in RAM when loaded back).
+        embs = backbone(imgs).cpu().clone()
         cache.update(zip(batch, embs))
 
     torch.save(cache, cache_path(root, backbone_name))
