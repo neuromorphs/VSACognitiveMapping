@@ -1,0 +1,10 @@
+{
+  "name": "classroom",
+  "repo": "lorinachey/spot-telluride-workshop-dataset",
+  "rgb_config": "rgb_d455",
+  "odom_config": "odometry_lio_sam",
+  "out_dir": "external/VSACognitiveMapping-init-am/outputs/classroom_detections",
+  "embed": {"device": "cpu", "batch_size": 16, "limit": null},
+  "build": {"subset": "stride", "stride": 3, "hd_dim": 8192, "pca_whiten": true},
+  "serve": {"port": 8020, "grid_resolution": 56}
+}

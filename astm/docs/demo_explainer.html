@@ -1,0 +1,302 @@
+<title>VSA Classroom Demo — What Is Going On</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1b1f24;
+    --muted: #57606a;
+    --accent: #0b6bcb;
+    --accent2: #8a4baf;
+    --card: #f6f8fa;
+    --border: #d5dbe1;
+    --mathbg: #eef3f8;
+    --warn: #9a6700;
+    --good: #1a7f37;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #9aa4b2;
+      --accent: #58a6ff;
+      --accent2: #c297e0;
+      --card: #161b22;
+      --border: #30363d;
+      --mathbg: #10202f;
+      --warn: #d29922;
+      --good: #3fb950;
+    }
+  }
+  .explainer {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 2rem 1.25rem 4rem;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    font-size: 16px;
+  }
+  .explainer h1 { font-size: 1.8rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+  .explainer h2 {
+    font-size: 1.25rem; margin: 2.2rem 0 .6rem; padding-bottom: .25rem;
+    border-bottom: 1px solid var(--border); letter-spacing: -.01em;
+  }
+  .explainer h3 { font-size: 1.02rem; margin: 1.2rem 0 .35rem; }
+  .kicker { color: var(--muted); margin: 0 0 1.4rem; font-size: .95rem; }
+  .lede { font-size: 1.05rem; }
+  .math {
+    background: var(--mathbg); border: 1px solid var(--border); border-radius: 8px;
+    padding: .55rem .9rem; margin: .6rem 0;
+    font-family: Consolas, "SF Mono", Menlo, monospace; font-size: .92rem;
+    overflow-x: auto; white-space: nowrap;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: .9rem 1.1rem; margin: .8rem 0;
+  }
+  .card h3 { margin-top: 0; }
+  .stagegrid { counter-reset: stage; }
+  .stage { display: flex; gap: .8rem; margin: .8rem 0; }
+  .stage .num {
+    counter-increment: stage; flex: 0 0 auto;
+    width: 1.8rem; height: 1.8rem; border-radius: 50%;
+    background: var(--accent); color: #fff; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; font-size: .95rem;
+    margin-top: .15rem;
+  }
+  .stage .num::before { content: counter(stage); }
+  .stage .body { flex: 1 1 auto; min-width: 0; }
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { border: 1px solid var(--border); padding: .4rem .6rem; text-align: left; vertical-align: top; }
+  th { background: var(--card); }
+  td.num { font-family: Consolas, Menlo, monospace; white-space: nowrap; }
+  .pill {
+    display: inline-block; font-size: .75rem; font-weight: 600; border-radius: 999px;
+    padding: .1rem .55rem; margin-right: .35rem; vertical-align: middle;
+    border: 1px solid var(--border); color: var(--accent);
+  }
+  .warnlist li::marker { color: var(--warn); }
+  .thesis {
+    border-left: 4px solid var(--accent2); padding: .6rem 1rem; margin: 1rem 0;
+    background: var(--card); border-radius: 0 8px 8px 0; font-size: 1.02rem;
+  }
+  .muted { color: var(--muted); }
+  code {
+    background: var(--card); border: 1px solid var(--border); border-radius: 4px;
+    padding: 0 .3rem; font-size: .88em; font-family: Consolas, Menlo, monospace;
+  }
+  .explainer img { max-width: 100%; }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: .25rem 0; }
+</style>
+
+<div class="explainer">
+
+<h1>What is going on in this demo?</h1>
+<p class="kicker">Spot classroom walk &middot; FHRR phasor algebra &middot; every number below is measured on our own data &middot; 2026-07-30</p>
+
+<p class="lede">The robot walked one loop of a classroom (2,478 camera frames, ~7&times;6.5&nbsp;m).
+Everything it saw is superimposed into a few <strong>single fixed-size vectors</strong> —
+8,192 complex numbers each. The page you're watching answers
+<em>"where have I seen this view?"</em>, <em>"what did I see there?"</em>, and
+<em>"where were the chairs?"</em> by doing two or three element-wise vector operations
+per query. No database, no search tree, no memory growth. Milliseconds on a CPU.</p>
+
+<h2>The 60-second version</h2>
+<p>Each vector is a strip holding 8,192 tiny <strong>clock hands</strong>, each frozen at some angle (a "phasor").
+Three operations do all the work:</p>
+<div class="card">
+  <p><strong>Bind &nbsp;⊗</strong> — add the clock angles, position by position. Like stacking two tinted
+  transparencies: the stack looks like noise, resembling <em>neither</em> input — but nothing is lost.</p>
+  <p><strong>Bundle &nbsp;Σ</strong> — average many stacks onto <em>one</em> strip, like a multiple-exposure
+  photograph (or many voices on one tape). The strip never gets longer; each recording just gets a little noisier.</p>
+  <p><strong>Unbind &nbsp;⊘</strong> — subtract the angles of a factor you know. Hold up the exact complementary
+  filter and whatever was bound with that factor <em>snaps back into focus</em>; everything else stays noise.</p>
+</div>
+<p>The robot stores <em>what-it-saw</em> ⊗ <em>where-it-was</em> for every moment, all summed into one vector.
+Unbind by "where" and you get "what"; unbind by "what" and you get "where" — the same memory answers both
+directions. The catch: recall is <em>approximate</em>, and gets noisier as more items share the vector.
+That capacity trade is real and you can see it in the demo.</p>
+
+<h2>The pipeline, stage by stage</h2>
+<div class="stagegrid">
+
+<div class="stage"><span class="num"></span><div class="body">
+<h3>YOLO sees</h3>
+<p>YOLOv8n runs on every frame: detection boxes (8,878 detections across 2,478 frames) plus one
+256-d feature vector per frame. Ordinary computer vision — no VSA yet.</p>
+</div></div>
+
+<div class="stage"><span class="num"></span><div class="body">
+<h3>PCA whitening — the step that makes it work at all</h3>
+<p>Raw YOLO features are nearly parallel: pairwise cosine 0.76–1.00 (mean <strong>0.88</strong>),
+effective rank 8.1 of 256. Every frame "looks like" every other frame, so when hundreds are bundled the
+shared direction adds up <em>coherently</em> — crosstalk ≈ <strong>365&times;</strong> the signal. Recall is destroyed.
+Whitening (subtract the mean, decorrelate, rescale) drops off-diagonal similarity to |mean| 0.067 and
+crosstalk to ≈ <strong>27&times;</strong>; ~90% of the fix is mean-removal alone. Heading recall went
+28% → <strong>98%</strong> within 20°. This <em>isotropy&nbsp;⇔&nbsp;capacity</em> link is the scientific core of the paper.</p>
+</div></div>
+
+<div class="stage"><span class="num"></span><div class="body">
+<h3>Project to 8,192-d phasors</h3>
+<p>A fixed random projection lifts the whitened 256-d feature to 8,192 dimensions, then keeps only the
+<em>angle</em> of each component (unit length). Neighbourhood structure survives; unit length is what makes
+unbinding an exact inverse.</p>
+</div></div>
+
+<div class="stage"><span class="num"></span><div class="body">
+<h3>Encode where / which way / when (FPE)</h3>
+<p>Continuous quantities become vectors by <em>fractional power encoding</em>: raise a fixed random base
+vector to a real-valued power (rotate every clock hand proportionally).</p>
+<div class="math">ctx_pos(x, y) = Bx^(x/ℓ) ⊗ By^(y/ℓ) &nbsp;&nbsp;&nbsp; ctx_time(t) = Bt^(t/ℓ)</div>
+<p>Nearby places get similar vectors; the length-scale ℓ sets how fast similarity falls off.
+Heading is special: yaw wraps at ±π, so its base uses integer frequencies (|k| ≤ 3) —
+ctx(ψ+2π) = ctx(ψ) <em>exactly</em>.</p>
+</div></div>
+
+<div class="stage"><span class="num"></span><div class="body">
+<h3>Build the memories</h3>
+<p>Three <strong>per-axis</strong> memories (each only discriminates along its own axis):</p>
+<div class="math">M_axis = mean_n &nbsp;content_n ⊗ ctx_axis(n) &nbsp;&nbsp;&nbsp; axis ∈ {position, heading, time}</div>
+<p>Plus the <strong>ASTM multi-trace set</strong>: class⊗place, class⊗time, place⊗time, and the full
+class⊗place⊗time event trace — one trace per query shape. Why not one trace for everything?
+Measured: supplying only one factor to a triple-bound trace ("under-unbinding") attenuates the answer
+<strong>22&times;</strong> (0.247 vs 0.011). The marginal traces are the high-signal pathways.</p>
+</div></div>
+
+<div class="stage"><span class="num"></span><div class="body">
+<h3>Every query = unbind + sweep</h3>
+<div class="math">residual = M ⊘ (what you know) &nbsp;&nbsp;→&nbsp;&nbsp; similarity sweep over (what you don't)</div>
+<p>Sweep a dense (x,y) grid for place, 181 angles for heading, the stored codebook for time, the class
+vocabulary for "what". Ambiguity shows up honestly as a multi-modal heatmap instead of being hidden
+behind a single best guess.</p>
+</div></div>
+
+</div>
+
+<h2>How to drive the demo</h2>
+
+<div class="card">
+<p><span class="pill">PANEL</span><strong>Replay (reverse query)</strong> — scrub or auto-play 1,652 <em>held-out</em>
+frames (the memory stored only every 3rd frame — 826 — so the query view was never stored). Each tick unbinds all
+three memories by the current frame's content: the <strong>heatmap</strong> is "where have I seen something like this?"
+(compare peak marker vs true-pose marker), the <strong>polar plot</strong> is "facing which way?", the
+<strong>time readout</strong> recalls the nearest stored moment (typically 0.2–0.8&nbsp;s from truth). ~10&nbsp;ms per query.
+Two warm blobs = two genuinely similar-looking places — that's the honest answer, not a bug.</p>
+</div>
+
+<div class="card">
+<p><span class="pill">PANEL</span><strong>Class → where (dropdown)</strong> — pick one of 21 classes. Stored frames
+containing that class are bundled into a probe and unbound from the position memory (~7&nbsp;ms). A mode select picks
+the semantic memory: <strong>vantage</strong> = the observation footprint (where the class was <em>seen from</em>);
+<strong>object</strong> = depth-derived object positions (where the class <em>is</em> — chair peak 0.086&nbsp;m from the
+largest furniture cluster vs 2.11&nbsp;m for vantage); <strong>now</strong> = the λ-decaying working memory
+(fresh 0.12–0.51&nbsp;m, honest "forgotten" badge when stale).</p>
+</div>
+
+<div class="card">
+<p><span class="pill">PANEL</span><strong>Click-to-query (forward)</strong> — click anywhere on the map: the point is
+encoded, unbound, and matched against stored frames → top-k recalled views with thumbnails and detections.
+Verified: clicking a trajectory point recalled a stored frame 2&nbsp;cm away.</p>
+</div>
+
+<div class="card">
+<p><span class="pill">PANEL</span><strong>ASTM spatio-temporal queries</strong> — give any two of
+{what, where, when}; the router unbinds the matching trace to decode the third: <em>"where was the chair at t=150?"</em>,
+<em>"when was something at this spot?"</em>, <em>"what was here in this window?"</em>. Temporal <strong>range kernels</strong>
+make a time <em>range</em> cost the same as a time <em>point</em> (closed-form per frequency); small discrete unknowns
+("which object moved?") use a fast vocabulary scan.</p>
+</div>
+
+<h2>The numbers (measured, our data)</h2>
+<div class="tablewrap">
+<table>
+  <tr><th>Quantity</th><th>Value</th></tr>
+  <tr><td>Dataset</td><td class="num">2,478 RGB frames &middot; 496 LIO-SAM poses &middot; ~7&times;6.5 m room</td></tr>
+  <tr><td>Raw YOLO feature similarity</td><td class="num">cos 0.76–1.00 (mean 0.88) &middot; eff. rank 8.1/256</td></tr>
+  <tr><td>Crosstalk, raw → whitened</td><td class="num">≈365&times; → ≈27&times; signal</td></tr>
+  <tr><td>Heading recall, raw → whitened</td><td class="num">28% → 98% (within 20°)</td></tr>
+  <tr><td>Recall, workshop build (826 stored, hd 8192)</td><td class="num">position L1 0.183 m &middot; heading 0.122 rad</td></tr>
+  <tr><td>Recall, our port (413 stored, hd 8192)</td><td class="num">position L1 0.14 m &middot; heading 0.13 rad &middot; time 3.7 fr</td></tr>
+  <tr><td>"Where was the chair at time t?"</td><td class="num">8–11 cm vs robot truth</td></tr>
+  <tr><td>Under-unbinding penalty (why multi-trace)</td><td class="num">22&times; attenuation (0.247 vs 0.011)</td></tr>
+  <tr><td>ASTM bench (4,498 events, 38 classes)</td><td class="num">marginals 0.05–0.22 m / 11–13 fr &middot; conjunctive 0.09–0.15 m</td></tr>
+  <tr><td>Query latency (CPU)</td><td class="num">3–16 ms point queries &middot; range-kernel grid decode 168 → 14.5 ms (fast-decode rewrite)</td></tr>
+  <tr><td>Calibrated abstention</td><td class="num">z≥3 ≙ sim≈0.0037 &middot; 93% confident-correct &middot; 80% abstention precision &middot; AUROC z 0.872 ≈ sim 0.878</td></tr>
+  <tr><td>Demo hot path</td><td class="num">800 ms → 10 ms per reverse query (80&times;)</td></tr>
+  <tr><td>Trace footprint</td><td class="num">512 KB traces (420 MB total incl. decode grids at hd 8192 &middot; sweep Pareto knee D=4096 = 118 MB)</td></tr>
+  <tr><td>Rare-class bias fix (log weighting)</td><td class="num">low-tercile error 5.15 m → 0.12 m &middot; frequent classes unharmed</td></tr>
+  <tr><td>Object-position mode (chair)</td><td class="num">peak 0.086 m from largest furniture cluster (vantage build: 2.11 m)</td></tr>
+  <tr><td>Online whitening (causal Welford)</td><td class="num">final-third recall 0.146 m vs oracle 0.090 m</td></tr>
+  <tr><td>Synthetic moved object</td><td class="num">which_moved ranks tv #1 &middot; 1.71 m recovered vs 1.68 m injected &middot; control 0.38 m</td></tr>
+  <tr><td>Language queries (never-stored paraphrases)</td><td class="num">direct latent unbind median 0.17 m (12/15 &lt; 1 m) &middot; soft grounding 0.11 m</td></tr>
+</table>
+</div>
+<p class="muted">Cross-check: the workshop's own evaluation code, run on their build of our data, independently
+reproduces our numbers — two implementations, same data, same answers.</p>
+
+<h2>Language queries — free text as the unbinding key</h2>
+<p>New (2026-07-30): the demo story now extends to natural language (<code>language_query.py</code>). MiniLM sentence
+latents are whitened over a ~180-noun vocabulary — the same isotropy medicine, applied to the language modality —
+projected to phasors, and the memory rebuilt with <strong>text-derived class atoms</strong> over object-position events.
+Two mechanisms, tested on 15 paraphrases that were <em>never stored</em>:</p>
+<ul>
+  <li><strong>Soft grounding</strong> (text-similarity routing to class atoms): 10/15 top-1, median error <strong>0.11&nbsp;m</strong>.</li>
+  <li><strong>Direct latent unbinding</strong> (the free-text latent itself unbinds the memory — no codebook routing):
+      median <strong>0.17&nbsp;m</strong>, 12/15 within 1&nbsp;m — "luggage"→suitcase 0.03&nbsp;m,
+      "cold storage for food"→fridge 0.24&nbsp;m, "cutting tool for paper"→scissors 0.11&nbsp;m.</li>
+</ul>
+<p>Failures are LM-semantic ("something to sit on" spreads over couch/table/chair), not VSA-mechanical — and the two
+mechanisms fail on <em>different</em> queries, so they are complementary. Figure: <code>outputs/classroom/language_query.png</code>.</p>
+
+<h2>Limitations — the 2026-07-30 ledger</h2>
+<p>The original "what this does not show (yet)" list is mostly resolved. What changed, and what remains:</p>
+<h3>Since measured/fixed (2026-07-30)</h3>
+<ul>
+  <li><strong>Whitening was offline</strong> → causal Welford whitening reaches near-oracle recall by the final third
+      (0.146 vs 0.090&nbsp;m); a frozen calibration lap fails at any K (1.15–1.73&nbsp;m), EMA is worse, and the design law is
+      <em>store codes as encoded, never re-encode</em> (causal vs final-stats codes stay ~orthogonal, sim 0.29).</li>
+  <li><strong>Frequency bias</strong> → it shows up as <em>position error</em> (crosstalk hijacks rare-class peaks), not
+      abstention; log class-weighting fixes it — rare-tercile error 5.15&nbsp;m → 0.12&nbsp;m, frequent classes unharmed.</li>
+  <li><strong>Similarities were uncalibrated</strong> → per-decode-type null z-scores (z≥3 ≙ sim≈0.0037; 93%
+      confident-correct, 80% abstention precision); AUROC z 0.872 ≈ raw sim 0.878 — within a decode type z is a monotone
+      affine of sim, so its value is the <em>interpretable threshold</em>, not extra discrimination; risk–coverage 42%
+      coverage at 29% selective risk; range-kernel queries need shape-matched nulls.</li>
+  <li><strong>"Which object moved?" unproven</strong> → demonstrated synthetically: tv events relocated 1.68&nbsp;m;
+      gated which_moved ranks tv #1 and measures 1.71&nbsp;m; control clean (0.38&nbsp;m); the timeless marginal is bimodal
+      and misleading — the event trace is necessary.</li>
+  <li><strong>Robot pose, not object position</strong> → <code>--place-mode object</code> binds to depth-derived object
+      positions; chair peak 0.086&nbsp;m from the largest furniture cluster (vantage build: 2.11&nbsp;m).</li>
+  <li><strong>Detector garbage</strong> → hygiene filters (<code>--min-class-events</code>, <code>--class-blocklist</code>)
+      drop junk classes at the canonical-stream boundary.</li>
+</ul>
+<h3>Still open</h3>
+<ul class="warnlist">
+  <li>Staged own-data collection with position ground truth (required — school_run1's dataset odometry is diverged).</li>
+  <li>Baselines B–D (temporal graph, LLM-compiler, VLM) + ReMEmbR.</li>
+  <li>Online whitening <em>deployment</em> integration — the eval exists; the pipeline flag does not.</li>
+  <li>Instance identity (tracks as atoms; needs a tracker front-end).</li>
+  <li>Multimodal-time mode-picking (the dominant residual decode error).</li>
+  <li>Real multi-loop robustness — the moved-object result is synthetic; the physical data is still one loop.</li>
+</ul>
+
+<h2>Why three codebases tell one story</h2>
+<p>This demo sits at the junction of three in-house lineages that all speak the same phasor algebra:</p>
+<ul>
+  <li><strong>init-am</strong> (the engine behind this page) — <em>episodic memory</em>: bind what-you-saw to
+      where/when, recall either direction.</li>
+  <li><strong>GC-VSA</strong> (Krausse, Neftci, Sommer, Renner — IJCNN 2025) — <em>what⊗where⊗when queries</em>,
+      previously synthetic-only; the ASTM panel is those ideas on real robot data.</li>
+  <li><strong>le-marmotte VGPI</strong> — <em>localization</em>: lidar positioning in ONE 2048-d vector
+      (~16 KB map), 0.13 m relocalization on this same dataset, with FPGA ports.</li>
+</ul>
+<div class="thesis">One lineage remembers, one queries, one localizes — same bind / bundle / unbind, same
+fixed-size vectors. <strong>VSAs as the algebraic composition layer for embodied spatial cognition:</strong>
+perception, mapping, episodic memory, and localization as operations in a single fixed-dimensional vector space.</div>
+
+<p class="muted">Deeper dives: <code>wiki/analysis/2026-07-29-demo-explainer.md</code> (this page with citations),
+<code>wiki/analysis/2026-07-29-vsa-query-layer-paper-plan.md</code> (paper plan + tracker). Figures:
+<code>outputs/classroom/evaluate.png</code>, <code>event_binding_demo.png</code>, <code>semantic_query_chair.png</code>.</p>
+
+</div>

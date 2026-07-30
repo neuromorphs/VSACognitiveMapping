@@ -1,0 +1,173 @@
+<title>VSA Cognitive Mapping — Complete Code &amp; Memory Explainer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#ffffff; --ink:#171b21; --mut:#5b6572; --line:#dde2e9;
+    --acc:#0d7d88; --acc2:#b9772a; --good:#2f8f5b; --warn:#b03a3a;
+    --code:#eef1f4;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#101318; --card:#171c24; --ink:#e8edf3; --mut:#93a1b3;
+      --line:#262e3a; --acc:#2bb8c6; --acc2:#e0a02e; --good:#48c383;
+      --warn:#e06a6a; --code:#0b0e12; }
+  }
+  :root[data-theme="dark"]{ --bg:#101318; --card:#171c24; --ink:#e8edf3; --mut:#93a1b3;
+      --line:#262e3a; --acc:#2bb8c6; --acc2:#e0a02e; --good:#48c383;
+      --warn:#e06a6a; --code:#0b0e12; }
+  :root[data-theme="light"]{ --bg:#f4f5f7; --card:#ffffff; --ink:#171b21; --mut:#5b6572;
+      --line:#dde2e9; --acc:#0d7d88; --acc2:#b9772a; --good:#2f8f5b; --warn:#b03a3a; --code:#eef1f4; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"Segoe UI",system-ui,sans-serif;line-height:1.65;font-size:16px}
+  .wrap{max-width:880px;margin:0 auto;padding:36px 22px 80px}
+  h1{font-size:28px;line-height:1.15;margin:0 0 6px;letter-spacing:-.01em}
+  h2{font-size:20px;margin:44px 0 10px;letter-spacing:-.01em;border-bottom:1px solid var(--line);padding-bottom:6px}
+  h3{font-size:16px;margin:22px 0 6px}
+  p{margin:0 0 12px}
+  .sub{color:var(--mut);font-size:15px;margin-bottom:26px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:14px 0}
+  .big{border-left:4px solid var(--acc)}
+  table{border-collapse:collapse;width:100%;font-size:14px;margin:10px 0}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--code);font-weight:600}
+  code,.eq{font-family:"Cascadia Code",ui-monospace,Consolas,monospace;font-size:.9em;
+    background:var(--code);border:1px solid var(--line);border-radius:5px;padding:.1em .35em}
+  .eq{display:block;padding:10px 14px;margin:10px 0;overflow-x:auto;white-space:pre}
+  .tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:10px;border:1px solid var(--line);
+    color:var(--mut);margin-right:6px;white-space:nowrap}
+  .keep{color:var(--good);font-weight:600}
+  .fade{color:var(--acc2);font-weight:600}
+  .num{font-variant-numeric:tabular-nums}
+  ul{margin:6px 0 12px;padding-left:22px}
+  li{margin:3px 0}
+  .scroll{overflow-x:auto}
+  .mut{color:var(--mut)}
+</style>
+
+<div class="wrap">
+<h1>The VSA cognitive-mapping stack — every part, explained</h1>
+<p class="sub">What each file does, when it was added, which memory forgets (only one — on purpose), and the measured numbers behind it all. Companion to the live demo at <code>localhost:8020</code>.</p>
+
+<div class="card big">
+<h3 style="margin-top:0">First, the decay question — does the map forget item locations?</h3>
+<p><b>No.</b> Every memory that stores <em>where items are</em> is permanent. The decay factor λ exists in exactly one optional, separate vector — the <b>working memory <code>M_now</code></b> — built only if you run <code>build_now</code>. Its job is the one question a permanent memory cannot answer well: <em>"where is the moving thing right now?"</em> For a person walking around, every old sighting is a wrong answer; the permanent memory returns the smear of all of them, the decayed one returns only the freshest — and admits "forgotten" when even that has gone stale. Furniture keeps its permanent map either way.</p>
+<p style="margin-bottom:0">Setting λ = 1 turns <code>M_now</code> back into an ordinary permanent memory: decay is a <em>dial</em>, and your original associative memory sits at one end of it.</p>
+</div>
+
+<h2>1 · The memory taxonomy — which vector answers which question</h2>
+<div class="scroll"><table>
+<tr><th>Memory</th><th>Contents (bind ⊗, sum Σ)</th><th>Answers</th><th>Forgets?</th><th>File / builder</th></tr>
+<tr><td><code>semantic_position</code></td><td>Σ conf · CLASS ⊗ POS(robot)</td><td>"from where were chairs <em>seen</em>?" (vantage)</td><td class="keep">never</td><td>memory.pt · <code>classroom_pipeline build</code></td></tr>
+<tr><td><code>memory_object.pt</code></td><td>Σ conf · CLASS ⊗ POS(object, via depth)</td><td>"where <em>are</em> the chairs?"</td><td class="keep">never</td><td><code>build --place-mode object</code></td></tr>
+<tr><td>ASTM marginals ×3</td><td>CLASS⊗POS · CLASS⊗TIME · POS⊗TIME</td><td>where-ever / when / occupancy history</td><td class="keep">never</td><td>astm_traces.pt · <code>astm_traces build</code></td></tr>
+<tr><td>ASTM event trace</td><td>Σ conf · CLASS ⊗ POS ⊗ TIME</td><td>"where was X <em>at time t</em>?" (any two known → third)</td><td class="keep">never</td><td>astm_traces.pt</td></tr>
+<tr><td>Workshop per-axis ×3</td><td>frame-content ⊗ POS / HEAD / TIME</td><td>"have I <em>been here</em> before?" (episodic replay)</td><td class="keep">never</td><td>associative_memory_stride.pt (workshop code)</td></tr>
+<tr><td><b><code>M_now</code></b></td><td>λ<sub>class</sub>·M + conf · CLASS ⊗ POS</td><td>"where is the <em>person now</em>?"</td><td class="fade">yes — by design</td><td>memory_now.pt · <code>build_now</code></td></tr>
+</table></div>
+<p class="mut">Time appears two entirely different ways: as an <b>addressable coordinate</b> (FPE <code>ctx_time</code>, bound into the event trace — query any moment, nothing fades) and as an <b>amplitude fade</b> (λ in M_now — no coordinate, just recency). They are complementary: the logbook and the whiteboard.</p>
+
+<h2>2 · The λ decay, precisely</h2>
+<p class="eq">M_now  ←  λ<sub>class</sub> · M_now  +  conf · ( CLASS ⊗ POS(x, y) )</p>
+<ul>
+<li><b>What λ multiplies:</b> the <em>whole existing trace</em> — every stored (class ⊗ place) pair fades together as a unit. It is not attached to the time code or the position code; there is no <code>ctx_time</code> inside M_now at all. Time enters only through <em>when</em> each event was written.</li>
+<li><b>Per class:</b> person λ = 0.9 (forgets in ~70 stale frames), furniture λ = 0.995 (nearly permanent). Implemented as separate per-class accumulators bundled at query time.</li>
+<li><b>Provenance:</b> proposed 2026-07-29 in the dynamic-objects design discussion (the neuroscience-flavoured long-term vs working-memory split; in engineering terms, an exponential moving average — trivial in VSA because bundles are linear). Implemented 2026-07-30 (<code>build_now</code>/<code>query_now</code>); added to the demo as the "now" mode the same day.</li>
+<li><b>Two traps found during implementation</b> (both worth remembering):
+  <ul>
+  <li><em>Mass imbalance:</em> a rare class (person, trace mass ~223) is undecodable from a raw bundle shared with heavy classes (chair ~17,000) — crosstalk dragged the person peak 3.09 m. Fix: normalize each class trace by its own decayed evidence mass.</li>
+  <li><em>Normalization cancels decay:</em> trace and evidence both shrink by λ<sup>k</sup>, so their ratio preserves the last field forever. An evidence floor (10⁻³) restores true forgetting — below it the memory reports <b>"forgotten"</b> instead of a stale answer.</li>
+  </ul></li>
+<li><b>Measured:</b> fresh sightings decode 0.12–0.51 m from truth; after 150 stale frames weight ≈ 2×10⁻⁷ → flagged forgotten (similarity 0.13 vs 0.77–0.93 fresh). The static memory, asked the same question, answers identically at all times with the all-sightings smear.</li>
+</ul>
+
+<h3>Hybrid decay clocks — what does "stale" count? (new, Jul 30)</h3>
+<p><code>build_now --decay-per {event, frame, metre, both}</code> picks the clock the fade runs on. Each class's clock counts from its <em>last write</em> (frame row + cumulative robot travel):</p>
+<p class="eq">λ_eff  =  λ_time ^ Δt_frames  ×  λ_dist ^ Δd_metres</p>
+<ul>
+<li><b>event</b> (default) — decay per written event; verified <em>bit-identical</em> to the previous build.</li>
+<li><b>frame</b> — decay per elapsed frame: a paused robot still forgets.</li>
+<li><b>metre</b> — decay per metre travelled (<code>--lambda-static-dist</code> 0.999, <code>--lambda-dynamic-dist</code> 0.7 per metre; 1/e washout = −1/ln λ metres): a paused robot <em>keeps</em> its memory. Distance-knob credit: Krausse's le-marmotte 1/e washout — independently convergent; the product form composes both.</li>
+<li><b>both</b> — the product of the two. Caveat: a product of decays is <b>AND-forgetting</b> — the memory fades if <em>either</em> clock advances — not an interpolation between them.</li>
+<li><b>Measured contrast</b> (<code>compare_clocks</code>, real stationary window in the walk — person stale 75 frames at t=1163 while the robot barely moved): metre keeps weight <span class="num">14.8</span> while event/frame/both collapse to <span class="num">&lt;10⁻³</span> ("forgotten"). At a moving window (t=551, 2.06 m travelled) all time clocks give w≈0.03, metre w=28. Trade-off: metre slightly smears <em>fresh</em> fields. Figure: <code>outputs/classroom/decay_clocks_comparison.png</code>.</li>
+<li>Mode + rates are stored in <code>memory_now.pt</code> meta, so <code>query_now</code> knows which clock built the memory.</li>
+</ul>
+
+<h2>3 · The code map — every file, in dependency order</h2>
+
+<h3>Core algebra</h3>
+<div class="card"><span class="tag">vsa_cognitive_mapping/vsa.py</span><span class="tag">ported Jul 14</span>
+<p>The FHRR phasor core ported from the Telluride repo (jepa branch): <code>Phasor</code> (unit-modulus complex vectors; bind = elementwise ×, unbind = ÷, bundle = mean, FPE = fractional powers for continuous values), <code>random_project_to_phasor</code> (real features → phasors), analysis helpers (correlation matrices, fidelity/orthogonality scores, PCA). 18/18 upstream tests pass; one-line py3.9 compat change only.</p></div>
+
+<h3>Perception → memory pipelines</h3>
+<div class="card"><span class="tag">classroom_pipeline.py</span><span class="tag">Jul 14 → extended Jul 29–30</span>
+<p><code>embed</code> (YOLOv8n over the Spot classroom walk → per-frame features + detections) · <code>build</code> (per-axis position/heading/time memories + the semantic memories; <b>PCA whitening on by default</b> — raw YOLO features have 0.88 mutual cosine and 365× coherent crosstalk; whitening is what makes everything decode) · <code>evaluate</code> (self-recall in metres/radians/frames: <span class="num">0.14 m / 0.13 rad / 3.7 fr</span>) · <code>demo</code> (gif) · <code>query_class</code>, <code>query_event</code> (conditional what/where/when) · <b>new:</b> <code>--place-mode object</code> (bind to depth-derived object positions — chair peaks land <span class="num">0.13–0.34 m</span> from independently clustered furniture) · <b>new:</b> <code>build_now</code>/<code>query_now</code> (the λ working memory, §2) · <b>new Jul 30:</b> <code>build_now --decay-per {event|frame|metre|both}</code> + <code>--lambda-{static,dynamic}-dist</code> (which clock forgetting runs on, §2) and <code>compare_clocks</code> (all four clocks on the same data → one figure).</p></div>
+
+<div class="card"><span class="tag">object_map.py</span><span class="tag">Jul 14</span>
+<p>The constructive object map: lifts every detection to a metric world position (box + median D455 depth + pose), clusters into 83 discrete objects, binds <code>CLASS ⊗ POS(x,y)</code> into one vector, and serves an interactive map (class → heatmap of object locations; click → ranked "what's here"). This was the first "where ARE the items" memory — <code>--place-mode object</code> later brought the same idea into the main pipeline.</p></div>
+
+<h3>The ASTM engine (the paper's core)</h3>
+<div class="card"><span class="tag">astm_traces.py</span><span class="tag">Jul 29 → upgraded Jul 30</span>
+<p>The multi-trace spatio-temporal memory: a canonical <b>event stream</b> (4,498 events) feeds <b>four permanent traces</b> — three marginals + the full what⊗where⊗when event trace ("VSA secondary indexes": never store more factors than a query can supply; violating this costs a measured 22× attenuation). Plus: <b>closed-form time-range kernels</b> (a time <em>window</em> costs the same as a time <em>point</em>; probe-side only), a <b>query router</b> (give any two of what/where/when, decode the third), <b>which-moved</b> vocabulary scans, an <b>exact event table</b> baseline that auto-scores every answer, and — new — <b>multi-scale time</b> (bundle/bind of 5/20/80-row kernels; honest result: neither dominates, mode-picking is the real error source) and <b>calibrated abstention</b> (null-distribution z-scores; z≥3 ≙ sim≈0.0037; <span class="num">93%</span> confident-correct, <span class="num">80%</span> abstention precision). Range queries: <span class="num">168 → 14.5 ms</span> after the fast-decode rewrite.
+Jul-30 additions: <code>export --place-mode object</code> (depth-localized events, 2.1% fallback — ASTM chair peak <span class="num">0.086 m</span> from the largest furniture cluster vs 2.11 m vantage) with <b>hygiene filters</b> <code>--min-class-events</code>/<code>--class-blocklist</code> at the canonical-stream boundary; <code>build --class-weighting {conf|balanced|log}</code> — the sqrt-N frequency bias appears as <em>position error</em> (rare-tercile 5.15 m under conf) and <b>log weighting fixes it</b> (<span class="num">0.12 m</span>, frequent classes unharmed); <code>bench --bias-bench</code> (tercile bias benchmark); <code>--events-name</code>/<code>--traces-name</code> for parallel event streams / trace sets.</p></div>
+
+<div class="card"><span class="tag">calibration_eval.py</span><span class="tag">Jul 30</span>
+<p>Proper calibration metrics on a 544-query labeled battery (435 answerable, 109 unanswerable): AUROC z <span class="num">0.872</span> vs raw sim <span class="num">0.878</span> — per decode type they tie <em>by construction</em> (z is a monotone affine of sim within a type), so the z-score's value is the <b>interpretable threshold</b>, not extra discrimination; ECE ≈ 0.067, Brier ≈ 0.14; risk–coverage: z≥3 gives <span class="num">42%</span> coverage at <span class="num">29%</span> selective risk (vs 62% error at full coverage). Key finding: range-kernel queries need <b>shape-matched nulls</b> — the stored point-probe null does not transfer.</p></div>
+
+<div class="card"><span class="tag">moved_object_synthetic.py</span><span class="tag">Jul 30</span>
+<p>The "which object moved?" claim, tested by construction: relocate all 265 second-half tv events by 1.68 m, then run gated which_moved (min-sim from a fake-class range-matched null). Modified run: tv ranks <b>#1</b>, displacement measured <span class="num">1.71 m</span> vs 1.68 m injected; control run clean (0.38 m vs 0.24 m natural). Bonus lesson: the <em>timeless</em> marginal is bimodal and its argmax loses the old place — the time-bound event trace is necessary.</p></div>
+
+<div class="card"><span class="tag">language_query.py</span><span class="tag">Jul 30</span>
+<p>Language→VSA queries: MiniLM sentence latents, whitened over a ~180-noun vocabulary (isotropy medicine for the language modality), projected to phasors; memory rebuilt with <b>text-derived class atoms</b> over object-position events. On 15 never-stored paraphrases: soft grounding (text-sim routing) 10/15 top-1, median <span class="num">0.11 m</span>; <b>direct latent unbinding</b> (free text as the unbinding key, no codebook) median <span class="num">0.17 m</span>, 12/15 within 1 m. Failures are LM-semantic ("something to sit on"), not VSA-mechanical; the two mechanisms fail on different queries.</p></div>
+
+<div class="card"><span class="tag">astm_sweep.py</span><span class="tag">Jul 30</span>
+<p>The D×N evaluation matrix: 5 dimensions × 4 event counts × 3 seeds = 60 cells in 7.7 min. Findings: accuracy saturates from <b>D=4096</b> (0.70→0.87 across D); <b>no capacity cliff</b> at full 4,498 events; <b>Pareto knee = D=4096</b> (118 MB honest total state, 0.80 accuracy, 2.7 ms median query); calibration improves with D (0.84→0.94 confident-correct). CSVs + 4 figures under <code>outputs/classroom/sweep/</code>.</p></div>
+
+<h3>Demos &amp; sharing</h3>
+<div class="card"><span class="tag">workshop_demo.py</span><span class="tag">Jul 29 → 30</span>
+<p>The live server (port 8020) driving the <em>actual workshop code</em> (external/VSACognitiveMapping-init-am): scrub/play 1,652 held-out frames with live reverse queries (~15 ms after the 80× hot-path fix + prefetch + blit rendering), forward click-queries, the ASTM query panel, and the semantic-mode select <b>[vantage | object | now]</b> — vantage = where classes were seen from; object = where they are; now = the decaying working memory with snapshot slider and "forgotten" badge.</p></div>
+
+<div class="card"><span class="tag">run_demo_pipeline.py + configs/</span><span class="tag">Jul 30</span>
+<p>One-command functionalisation: a JSON config (dataset repo + configs + parameters) runs embed → build → serve, skipping existing outputs. <code>school_run1.json</code> ran the full 11,211-frame pipeline unattended — heading/time scaled fine; position exposed the <em>dataset's</em> diverged odometry (km-scale drift — a data-quality finding, not a memory failure). New sensors: provide <code>embeddings.pt</code> + <code>detections.csv</code> and the VSA stages don't care where features came from.</p></div>
+
+<div class="card"><span class="tag">export_static_demo.py → share/classroom_demo/</span><span class="tag">Jul 30</span>
+<p>The shareable version: 15.4 MB of precomputed replay assets + a self-contained HTML viewer (no Python for the recipient; any static host / GitHub Pages). Pattern borrowed from the le-marmotte interactive-demo branch.</p></div>
+
+<h3>Science probes</h3>
+<div class="card"><span class="tag">probe_jepa_predictability.py</span><span class="tag">Jul 30</span>
+<p>The VSA-JEPA go/no-go measurement: FPE transport is <em>exact</em> (cos = 1.0000), so bound-state prediction reduces identically to content persistence (0.727 ≫ null 0.015). Conclusion: a learned predictor must beat <em>persistence</em>, not the null — i.e. model how appearance changes with motion; the algebra already does the rest for free.</p></div>
+
+<div class="card"><span class="tag">online_whitening_eval.py</span><span class="tag">Jul 30</span>
+<p>Closes the "whitening is offline" gap with numbers: <b>causal streaming Welford whitening</b> (per-frame top-64 eigendecomposition, sign-aligned) matches oracle isotropy by t≈300 and reaches near-oracle recall by the final third (<span class="num">0.146 vs 0.090 m</span> grid-decode L1). A frozen calibration lap does <em>not</em> suffice at any K (<span class="num">1.15–1.73 m</span>); EMA is worse than exact Welford everywhere. Surprise finding → design law: causal codes stay ~orthogonal to final-stats re-encodings (sim 0.29 even late) because degenerate eigen-subspaces keep rotating — <b>store codes as encoded; never re-encode stored content</b>. (Eval only — the deployment flag in the pipeline is still open.)</p></div>
+
+<h2>4 · Timeline — when each part arrived</h2>
+<div class="scroll"><table>
+<tr><th>Date</th><th>What</th></tr>
+<tr><td class="num">Jul 14</td><td>Ported core (<code>vsa.py</code>, 18/18 tests) · classroom pipeline on real Spot data · <b>whitening fix</b> (heading 28→98%) · object map + first live server</td></tr>
+<tr><td class="num">Jul 15</td><td>Semantic class memory + <code>query_class</code> · spatial⊗temporal event trace + <code>query_event</code> (8–11 cm conditional recall) · dynamic-objects design discussion → <b>λ working-memory concept</b></td></tr>
+<tr><td class="num">Jul 29</td><td>SuperMap comparison → ASTM paper plan (fact-checked, frozen) · <code>astm_traces.py</code> P0 + bench · workshop zips integrated, their code re-run (cross-validation: their evaluate reproduces our numbers) · live demo of their pipeline + 80× speed fix · class recall in demo · le-marmotte survey</td></tr>
+<tr><td class="num">Jul 30</td><td>Explainers · static share export · pipeline functionalisation · <b>λ implemented</b> (<code>build_now</code>) · object-position binding · ASTM upgrades (fast decode, multi-scale time, calibration) · JEPA probe · school_run1 E2 · D×N sweep · demo modes [vantage|object|now]</td></tr>
+<tr><td class="num">Jul 30 (batch 2)</td><td><b>Online whitening eval</b> (causal Welford ≈ oracle by final third; never re-encode) · <b>frequency-bias fix</b> (log class-weighting: 5.15 → 0.12 m) + object-position events (chair 0.086 m) + hygiene filters · <b>calibration metrics</b> (AUROC/ECE/risk–coverage; shape-matched nulls) · <b>synthetic moved object</b> (1.71 vs 1.68 m) · <b>hybrid decay clocks</b> (frame/metre/both + <code>compare_clocks</code>) · <b>language→VSA queries</b> (direct latent unbind 0.17 m)</td></tr>
+</table></div>
+
+<h2>5 · How to run everything</h2>
+<p class="eq"># live demo (all panels/modes)          python vsa_cognitive_mapping/workshop_demo.py --port 8020
+# full pipeline on any dataset          python vsa_cognitive_mapping/run_demo_pipeline.py --config vsa_cognitive_mapping/configs/classroom.json
+# object-position semantic map          python vsa_cognitive_mapping/classroom_pipeline.py build --place-mode object --memory-name memory_object.pt
+# working memory (the only λ)           python vsa_cognitive_mapping/classroom_pipeline.py build_now
+#   → person now                        python vsa_cognitive_mapping/classroom_pipeline.py query_now --class-name person
+#   → distance-based forgetting         python vsa_cognitive_mapping/classroom_pipeline.py build_now --decay-per metre
+#   → compare all four clocks           python vsa_cognitive_mapping/classroom_pipeline.py compare_clocks
+# spatio-temporal queries               python vsa_cognitive_mapping/astm_traces.py query --decode where --what chair --when 150
+#   → object-position event stream      python vsa_cognitive_mapping/astm_traces.py export --place-mode object --min-class-events 8
+#   → rare-class-safe build             python vsa_cognitive_mapping/astm_traces.py build --class-weighting log
+#   → frequency-bias benchmark          python vsa_cognitive_mapping/astm_traces.py bench --bias-bench
+# D×N evaluation matrix                 python vsa_cognitive_mapping/astm_sweep.py
+# calibration metrics (AUROC/ECE/RC)    python vsa_cognitive_mapping/calibration_eval.py
+# synthetic moved-object test           python vsa_cognitive_mapping/moved_object_synthetic.py
+# online whitening eval                 python vsa_cognitive_mapping/online_whitening_eval.py
+# language → VSA queries                python vsa_cognitive_mapping/language_query.py
+# JEPA probe                            python vsa_cognitive_mapping/probe_jepa_predictability.py
+# regenerate shareable export           python vsa_cognitive_mapping/export_static_demo.py</p>
+
+<p class="mut">Full research log: <code>wiki/analysis/2026-07-29-vsa-query-layer-paper-plan.md</code> (tracker entries a–o) · concept explainer: <code>outputs/classroom/demo_explainer.html</code>.</p>
+</div>
