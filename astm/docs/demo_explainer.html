@@ -135,7 +135,11 @@ effective rank 8.1 of 256. Every frame "looks like" every other frame, so when h
 shared direction adds up <em>coherently</em> — crosstalk ≈ <strong>365&times;</strong> the signal. Recall is destroyed.
 Whitening (subtract the mean, decorrelate, rescale) drops off-diagonal similarity to |mean| 0.067 and
 crosstalk to ≈ <strong>27&times;</strong>; ~90% of the fix is mean-removal alone. Heading recall went
-28% → <strong>98%</strong> within 20°. This <em>isotropy&nbsp;⇔&nbsp;capacity</em> link is the scientific core of the paper.</p>
+28% → <strong>98%</strong> within 20°. This <em>isotropy&nbsp;⇔&nbsp;capacity</em> link is the scientific core of the paper —
+narrowed carefully: prior VSA lineages used random (isotropic-by-construction) atoms, and learned-embedding
+anisotropy + whitening is established for language embeddings (Mu &amp; Viswanath 2018; Ethayarajh 2019;
+Su et al. 2021) and learned HRR vectors (Ganesan et al. NeurIPS 2021); the new part is the quantified
+anisotropy → associative-recall-collapse link on a deployed robot, plus a causal online estimator.</p>
 </div></div>
 
 <div class="stage"><span class="num"></span><div class="body">
@@ -148,7 +152,9 @@ unbinding an exact inverse.</p>
 <div class="stage"><span class="num"></span><div class="body">
 <h3>Encode where / which way / when (FPE)</h3>
 <p>Continuous quantities become vectors by <em>fractional power encoding</em>: raise a fixed random base
-vector to a real-valued power (rotate every clock hand proportionally).</p>
+vector to a real-valued power (rotate every clock hand proportionally). Lineage: the idea originates with
+Plate's HRRs, was developed as spatial semantic pointers by Komer et al. (CogSci 2019), and formalized as
+FPE / Vector Function Architectures by Frady et al. (2021).</p>
 <div class="math">ctx_pos(x, y) = Bx^(x/ℓ) ⊗ By^(y/ℓ) &nbsp;&nbsp;&nbsp; ctx_time(t) = Bt^(t/ℓ)</div>
 <p>Nearby places get similar vectors; the length-scale ℓ sets how fast similarity falls off.
 Heading is special: yaw wraps at ±π, so its base uses integer frequencies (|k| ≤ 3) —
@@ -286,7 +292,7 @@ mechanisms fail on <em>different</em> queries, so they are complementary. Figure
 <ul>
   <li><strong>init-am</strong> (the engine behind this page) — <em>episodic memory</em>: bind what-you-saw to
       where/when, recall either direction.</li>
-  <li><strong>GC-VSA</strong> (Krausse, Neftci, Sommer, Renner — IJCNN 2025) — <em>what⊗where⊗when queries</em>,
+  <li><strong>GC-VSA</strong> (Krausse, Neftci, Sommer, Renner — NICE 2025, arXiv:2503.08608) — <em>what⊗where⊗when queries</em>,
       previously synthetic-only; the ASTM panel is those ideas on real robot data.</li>
   <li><strong>le-marmotte VGPI</strong> — <em>localization</em>: lidar positioning in ONE 2048-d vector
       (~16 KB map), 0.13 m relocalization on this same dataset, with FPGA ports.</li>

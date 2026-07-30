@@ -19,12 +19,17 @@ Measurements over all consecutive pairs of outputs/classroom/embeddings.pt
     (a) content persistence      cos(s_t, s_{t+1})          [baseline]
     (b) place-code prediction    cos(ctx_t (x) T_t, ctx_{t+1})   [~1 sanity]
     (c) bound-state prediction   cos(z_t (x) T_t, z_{t+1})  [THE question]
-    (d) shuffled control         cos(z_hat_{t+1}, z_{t'+1}), wrong t'  [null]
+    (d) content-only null        cos(s_t, s_{t'}), same derangement of t'
     (e) horizon decay            (c) and cos(s_t, s_{t+h}) for h=1,2,4,8,16
 
 Note the algebra: with unit-modulus ctx and exact transport (b)=1, (c)
-collapses to (a) identically — the decisive comparison is (c) vs the
-shuffled null (d), plus how fast (e) decays.
+collapses to (a) IDENTICALLY — so (c) can never "beat" a null by more than
+persistence does. The honest framing is the persistence baseline: (c) vs
+(a) shows the bind adds nothing beyond persistence, and (d) — the
+content-only null under the same derangement — shows how much of the
+persistence is walk-wide content coherence rather than temporal adjacency.
+(The previous shuffled BOUND-STATE null was vacuous: it mostly measured
+position-code decorrelation, guaranteeing a large margin by construction.)
 
 Everything is vectorized over frames and hd dims; the whole run is seconds.
 
@@ -130,13 +135,17 @@ def run_probe(args):
     c = row_cos(z_hat, z[1:])
     results["c_bound_state"] = stats(c)
 
-    # ---- (d) shuffled control (null) --------------------------------------
+    # ---- (d) content-only null (same derangement) --------------------------
+    # cos(s_t, s_t') for a deranged pairing t' != t: how similar is the
+    # content atom to a WRONG frame's content? This is the null persistence
+    # must beat; a bound-state null would only measure position-code
+    # decorrelation and is vacuous by construction.
     n_pairs = N - 1
     perm = rng.permutation(n_pairs)
     fixed = np.where(perm == np.arange(n_pairs))[0]
     perm[fixed] = (perm[fixed] + 1) % n_pairs   # derangement: no t' == t
-    d = row_cos(z_hat, z[1:][perm])
-    results["d_shuffled_null"] = stats(d)
+    d = row_cos(s[:-1], s[1:][perm])
+    results["d_content_null"] = stats(d)
 
     # ---- (e) horizon decay -------------------------------------------------
     horizons = args.horizons
@@ -149,7 +158,7 @@ def run_probe(args):
         p = rng.permutation(m)
         fx = np.where(p == np.arange(m))[0]
         p[fx] = (p[fx] + 1) % m
-        nh = row_cos(z[:-h] * Th, z[h:][p])                  # null at horizon h
+        nh = row_cos(s[:-h], s[h:][p])          # content-only null at horizon h
         curve_pred.append(stats(ch))
         curve_content.append(stats(ah))
         curve_null.append(stats(nh))
@@ -157,27 +166,17 @@ def run_probe(args):
                             "pred": curve_pred, "content": curve_content,
                             "null": curve_null}
 
-    # ---- conclusion ---------------------------------------------------------
+    # ---- conclusion (persistence-baseline framing ONLY) ---------------------
     ma, mc, md = results["a_content_persistence"]["mean"], \
-        results["c_bound_state"]["mean"], results["d_shuffled_null"]["mean"]
-    margin = mc - md
-    if abs(mc - ma) <= 0.02 and margin > 0.05:
-        concl = (f"mixed: transport is lossless (b mean="
-                 f"{results['b_place_code']['mean']:.4f}) so bound-state "
-                 f"prediction exactly inherits content persistence "
-                 f"(a={ma:.3f} vs c={mc:.3f}); prediction adds nothing over "
-                 f"persistence, but binding transport preserves it "
-                 f"{margin:.3f} above the shuffled null ({md:.3f}).")
-    elif abs(mc - ma) <= 0.02:
-        concl = (f"content is trivially persistent (a={ma:.3f} ~ c={mc:.3f}, "
-                 f"prediction adds nothing; null {md:.3f}).")
-    elif margin > 0.05:
-        concl = (f"binding transport preserves prediction above null by "
-                 f"{margin:.3f} (c={mc:.3f} vs null {md:.3f}; content "
-                 f"baseline a={ma:.3f}).")
-    else:
-        concl = (f"mixed: c={mc:.3f}, a={ma:.3f}, null={md:.3f} — no clear "
-                 f"separation.")
+        results["c_bound_state"]["mean"], results["d_content_null"]["mean"]
+    concl = (f"persistence baseline: transport is lossless (b mean="
+             f"{results['b_place_code']['mean']:.4f}), so bound-state "
+             f"prediction inherits content persistence by identity "
+             f"(c={mc:.3f} vs a={ma:.3f}) — the bind adds NO predictive "
+             f"information beyond persistence. Content-only null (same "
+             f"derangement): {md:.3f}; adjacency contributes "
+             f"{ma - md:.3f} of persistence above walk-wide content "
+             f"coherence.")
     results["conclusion"] = concl
 
     return results, (a, b, c, d), (horizons, curve_pred, curve_content, curve_null)
@@ -199,7 +198,7 @@ def make_figure(dists, horizon_data, path):
     axs[0].hist(c, bins=bins, alpha=0.55, color="#b9772a",
                 label=f"(c) bound-state prediction  mean={c.mean():.3f}")
     axs[0].hist(d, bins=bins, alpha=0.55, color="0.5",
-                label=f"(d) shuffled null  mean={d.mean():.3f}")
+                label=f"(d) content-only null  mean={d.mean():.3f}")
     axs[0].axvline(b.mean(), color="black", lw=1.2, ls="--",
                    label=f"(b) place-code sanity  mean={b.mean():.4f}")
     axs[0].set_xlabel("cosine similarity")
@@ -218,7 +217,7 @@ def make_figure(dists, horizon_data, path):
     axs[1].fill_between(horizons, hp10, hp, color="#b9772a", alpha=0.15,
                         label="prediction p10..mean")
     axs[1].plot(horizons, hn, "^:", color="0.4", lw=1.2,
-                label="shuffled null")
+                label="content-only null")
     axs[1].set_xscale("log", base=2)
     axs[1].set_xticks(list(horizons))
     axs[1].set_xticklabels([str(h) for h in horizons])
@@ -255,7 +254,7 @@ def main():
 
     print("\n---- distributions (mean / median / p10) ----")
     for key in ("a_content_persistence", "b_place_code",
-                "c_bound_state", "d_shuffled_null"):
+                "c_bound_state", "d_content_null"):
         st = results[key]
         print(f"{key:>24}: {st['mean']:+.4f} / {st['median']:+.4f} / {st['p10']:+.4f}")
     print("\n---- horizon decay (mean cos) ----")

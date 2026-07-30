@@ -53,10 +53,9 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from vsa_cognitive_mapping.vsa import Phasor  # noqa: E402
-from vsa_cognitive_mapping.classroom_pipeline import _class_seed  # noqa: E402
 from vsa_cognitive_mapping.astm_traces import (  # noqa: E402
     ExactEventTable, QueryRouter, TraceSet, load_events,
-    POS_OK_M, TIME_OK_FR,
+    POS_OK_M, TIME_OK_FR, _class_seed_mixed,
 )
 
 DEFAULT_OUT = os.path.join("outputs", "classroom")
@@ -85,19 +84,26 @@ def subsample_events(ev, n, seed):
 # ==========================================================================
 
 def make_shell(hd_dim, seed, pos_l, time_l, classes_full, bounds_full,
-               t_max_full, grid):
+               t_max_full, grid, class_seed_mix=None):
     """TraceSet with full-stream bounds/t_max so decoder grids are built
-    once per (D, seed) and are identical across N cells."""
+    once per (D, seed) and are identical across N cells.
+
+    class_seed_mix (FIX 4): mixed into every class-atom seed so replicate
+    seeds draw independent class codebooks — previously the sweep seed
+    reseeded position/time bases and the subsample but NOT the class atoms,
+    so seed variance understated codebook-draw variance."""
     return TraceSet(hd_dim, seed, pos_l, time_l, classes_full, bounds_full,
-                    t_max_full, grid=grid)
+                    t_max_full, grid=grid, class_seed_mix=class_seed_mix)
 
 
 def fill_shell(tr, ev_sub, n_null):
     """Reset the shell's per-cell state (codebook, C_mat decoder, traces,
     calibration) and bundle the subsampled events. Decoder grids / time
-    axis / encoders are untouched (reused)."""
+    axis / encoders are untouched (reused). Class atoms honour the shell's
+    class_seed_mix (FIX 4)."""
     tr.classes = sorted(set(ev_sub["class"]))
-    tr.C = {c: Phasor(dim=tr.hd, seed=_class_seed(c)).values
+    mix = getattr(tr, "class_seed_mix", None)
+    tr.C = {c: Phasor(dim=tr.hd, seed=_class_seed_mixed(c, mix)).values
             for c in tr.classes}
     tr.C_mat = np.stack([tr.C[c] for c in tr.classes]).astype(np.complex64)
     tr.M = {k: np.zeros(tr.hd, np.complex128)
@@ -238,10 +244,11 @@ def run_cell(D, N, seed, ev_full, shell_cache, args, meta):
     timings = {}
     if key not in shell_cache:
         t0 = time.perf_counter()
+        mix = None if args.no_class_seed_mix else seed
         shell_cache[key] = make_shell(
             D, seed, args.pos_length_scale, args.time_length_scale,
             meta["classes_full"], meta["bounds_full"], meta["t_max_full"],
-            args.grid)
+            args.grid, class_seed_mix=mix)
         timings["shell_s"] = time.perf_counter() - t0
     else:
         timings["shell_s"] = 0.0
@@ -502,6 +509,10 @@ def main():
                          "extrapolation exceeds it")
     ap.add_argument("--mem-limit-mb", type=float, default=3000.0,
                     help="skip a cell if its shell estimate exceeds this")
+    ap.add_argument("--no-class-seed-mix", action="store_true",
+                    help="do NOT mix the cell seed into the class-atom seeds "
+                         "(pre-hardening behaviour: replicate seeds shared "
+                         "one class codebook, understating seed variance)")
     ap.add_argument("--out-dir", default=DEFAULT_OUT)
     args = ap.parse_args()
 
@@ -534,6 +545,18 @@ def main():
     PROF = (4096, 2000, 0)
     prof_D, prof_N, prof_seed = PROF
     notes = []
+    if args.no_class_seed_mix:
+        mix_note = ("# CLASS-ATOM SEEDING: --no-class-seed-mix (pre-hardening "
+                    "behaviour; all seeds share one class codebook).")
+    else:
+        mix_note = ("# CLASS-ATOM SEEDING (hardening FIX 4, NEW DEFAULT): "
+                    "class_seed_mix = cell seed - each replicate draws its "
+                    "own class codebook.")
+    notes.append(mix_note)
+    notes.append("# NULL CALIBRATION (hardening FIX 2, NEW DEFAULT): v2 "
+                 "per-(decode, trace, probe-kind) null cells; confident/"
+                 "abstained columns are not comparable to pre-hardening runs.")
+    print(mix_note.lstrip("# "))
     if prof_D in dims and prof_N in n_list and prof_seed in seeds:
         print(f"\nprofiling cell D={prof_D} N={prof_N} seed={prof_seed} ...")
         cell, rows, tm = run_cell(prof_D, prof_N, prof_seed, ev_full,

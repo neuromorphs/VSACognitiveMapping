@@ -49,9 +49,9 @@ clock hands, each frozen at some angle.
 So the robot stores `what-it-saw ⊗ where-it-was` for every moment, summed
 into one vector. Later, unbinding by "where" recovers "what", and unbinding
 by "what" recovers "where" — the same memory answers both directions. The
-price is that recall is *approximate*: signal-to-noise falls roughly as
-√(D/K) for K items in D dimensions, which is exactly the capacity trade the
-demo lets you see.
+price is that recall is *approximate*: signal-to-noise scales as
+√(2D/K) for K items in D dimensions (the factor 2 from the real-part
+readout), which is exactly the capacity trade the demo lets you see.
 
 ## The pipeline, stage by stage
 
@@ -70,9 +70,13 @@ demo lets you see.
    unit variance per component) drops off-diagonal |mean| similarity to
    0.067 and crosstalk to ≈ 27×; ~90% of the win is mean-removal alone.
    Concretely: the heading demo went from 28% to **98%** correct within 20°.
-   This isotropy ⇔ capacity link is the scientific core of the ASTM paper —
-   both prior VSA lineages used random (isotropic-by-construction) atoms;
-   real learned features break exactly that assumption.
+   Framing (narrowed post-verification): prior VSA lineages used random
+   (isotropic-by-construction) atoms, and learned-embedding anisotropy +
+   whitening is established for language embeddings (Mu & Viswanath 2018;
+   Ethayarajh 2019; Su et al. 2021) and learned HRR vectors (Ganesan et al.
+   NeurIPS 2021). What is new here is the quantified anisotropy →
+   associative-recall-collapse link on a deployed robot, plus a causal
+   online estimator of the whitening statistics.
 
 3. **Random projection to 8,192-d phasors.** The (whitened) 256-d embedding
    is pushed through a fixed Gaussian projection to (I,Q) pairs, normalised
@@ -82,7 +86,10 @@ demo lets you see.
    exact inverse).
 
 4. **FPE context encoding.** Continuous quantities become vectors via
-   fractional power encoding, `B^v` with phases `e^(i v φ)`:
+   fractional power encoding, `B^v` with phases `e^(i v φ)` (lineage: the
+   idea originates with Plate's HRRs, was developed as spatial semantic
+   pointers by Komer et al. CogSci 2019, and formalized as FPE / Vector
+   Function Architectures by Frady et al. 2021):
    - **Position**: `ctx_pos(x,y) = Bx^(x/ℓ) ⊗ By^(y/ℓ)` — nearby places get
      similar vectors, with the length-scale ℓ setting the similarity kernel
      width.
@@ -151,7 +158,7 @@ demo lets you see.
 |---|---|---|
 | Dataset | 2,478 RGB frames, 496 LIO-SAM poses, ~7×6.5 m room | classroom results page |
 | Raw YOLO embedding similarity | cos 0.76–1.00, mean 0.88; eff. rank 8.1/256 | classroom results page |
-| Coherent crosstalk, raw → whitened | ≈365× → ≈27× signal (off-diag \|mean\| 0.88 → 0.067) | classroom results page |
+| Crosstalk, raw → whitened (static off/on-target ratio) | ≈365× → ≈27× signal (off-diag \|mean\| 0.88 → 0.067) | classroom results page |
 | Heading demo, raw → whitened | 28% → 98% within 20° | classroom results page |
 | Our build recall (413 frames, hd 8192) | position L1 0.14 m, heading 0.13 rad, time 3.7 frames | classroom results page |
 | Workshop build recall (826 stored, stride 3) | position L1 **0.183 m**, heading **0.122 rad** | paper plan log (c) — their code, our data |
@@ -250,7 +257,7 @@ speaking the same FHRR phasor algebra:
 
 1. **init-am** (this demo's engine) — *episodic* associative memory: bind
    frame content to position/heading/time, recall either direction.
-2. **GC-VSA** (Krausse, Neftci, Sommer, Renner — IJCNN 2025) —
+2. **GC-VSA** (Krausse, Neftci, Sommer, Renner — NICE 2025, arXiv:2503.08608) —
    what ⊗ where ⊗ when factorised event memory with algebraic queries,
    demonstrated on synthetic data; the ASTM multi-trace panel is its ideas
    run on real robot data.

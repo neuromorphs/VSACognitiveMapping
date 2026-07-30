@@ -33,11 +33,15 @@ Implements the architecture frozen in
     is a single matvec against decoder matrices precomputed once at build
     (probe-side factors fold into the 1-D residual first, never into the
     decoder matrix).
-  * **Calibrated abstention**: at build time ~200 null probes per decode type
-    (mismatched class/time/place pairings from the trace's own vocabulary,
-    plus pure random unit phasors) give a null peak-similarity distribution;
-    every query reports z = (sim - null_mean)/null_std and
-    confident = (z >= threshold, default 3).
+  * **Calibrated abstention** (v2, evaluation-hardening 2026-07-30): at
+    build time ~200 null probes per (decode, trace, probe-kind) cell —
+    mismatched/fake keys routed through the same trace and probe kind as a
+    real query, plus random residuals at that trace's RMS amplitude — give
+    per-cell null peak-similarity distributions; every query reports
+    z = (sim - null_mean)/null_std against the MATCHING cell (info["null"]
+    names it) and confident = (z >= threshold, default 3). The v1
+    one-null-per-decode-type scheme (misapplied across marginal/range
+    queries) is kept only as a fallback for old .pt files.
   * **Baseline A** — the exact temporal event table — runs beside every VSA
     query so answers are scored automatically (accuracy vs the table is the
     paper's correctness metric; the table will win at this scale — the paper
@@ -54,6 +58,7 @@ Usage (from repo root, after classroom_pipeline embed has been run):
     python vsa_cognitive_mapping/astm_traces.py build --events-name events_object.csv --traces-name astm_traces_object.pt
     python vsa_cognitive_mapping/astm_traces.py build --time-scales 5,20,80 --time-combine bundle
     python vsa_cognitive_mapping/astm_traces.py bench
+    python vsa_cognitive_mapping/astm_traces.py bench --gt-bandwidths "0.4,0.75,1.5"  # GT-bandwidth sensitivity + supported criterion
     python vsa_cognitive_mapping/astm_traces.py bench --compare      # 3-way single/bundle/bind
     python vsa_cognitive_mapping/astm_traces.py bench --bias-bench   # conf/balanced/log class-frequency bias
     python vsa_cognitive_mapping/astm_traces.py query --what chair --when 150
@@ -69,6 +74,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import sys
@@ -94,6 +100,28 @@ TRACES_PT = "astm_traces.pt"
 # correctness thresholds used for bench scoring / abstention stats
 POS_OK_M = 1.0      # position answers within 1 m of the exact modal answer
 TIME_OK_FR = 40.0   # time answers within 40 frames (= 2x base time scale)
+
+# ground-truth KDE bandwidths used by ExactEventTable by default. NOTE
+# (evaluation-hardening review, tracker entry (r)): these EQUAL the FPE
+# length scales (pos 0.75 m / time 20 fr), which makes table and memory
+# near-identical estimators that can mode-flip together. `bench
+# --gt-bandwidths` re-scores the same answers under several bandwidths and
+# under a bandwidth-free "supported" criterion — see cmd_bench.
+GT_POS_BW = 0.75
+GT_TIME_BW = 20.0
+
+
+def _class_seed_mixed(name: str, mix=None) -> int:
+    """Per-class atom seed, optionally mixed with an integer.
+
+    mix=None -> exactly ``_class_seed(name)`` (the historical default; every
+    logged artifact used this). mix=k -> a deterministic md5-based reseed of
+    the whole class codebook (NOT Python's salted ``hash()``), so sweep
+    replicates can draw genuinely different class atoms per seed."""
+    if mix is None:
+        return _class_seed(name)
+    return int(hashlib.md5(f"{name}|{int(mix)}".encode()).hexdigest(),
+               16) % 10_000_000
 
 
 # ==========================================================================
@@ -212,7 +240,7 @@ class ExactEventTable:
             m &= (self.ev["t"] >= a) & (self.ev["t"] <= b)
         return m
 
-    def where(self, what=None, when=None, bw=0.75):
+    def where(self, what=None, when=None, bw=GT_POS_BW):
         """Conf-weighted MODAL position of matching events (None if none).
 
         Mode, not mean: the VSA decode answers 'the densest place', and for
@@ -228,7 +256,7 @@ class ExactEventTable:
         k = int(np.argmax(dens))
         return (float(xs[k]), float(ys[k]))
 
-    def when(self, what=None, near_xy=None, radius=1.0, bw=20.0):
+    def when(self, what=None, near_xy=None, radius=1.0, bw=GT_TIME_BW):
         """Conf-weighted MODAL time (bandwidth bw = FPE time length-scale)."""
         m = self._mask(what)
         if near_xy is not None:
@@ -252,6 +280,45 @@ class ExactEventTable:
         for c, cf in zip(self.cls_arr[m], self.ev["conf"][m]):
             scores[c] += cf
         return max(scores, key=scores.get)
+
+    # ---- bandwidth-free "supported" criterion (FIX 1b, tracker entry (r)) --
+    def supported(self, kind, ans, gt_kwargs):
+        """Is the VSA answer supported by ANY raw event, no KDE involved?
+
+        pos:   answer within POS_OK_M of any event of the queried class in
+               the queried window;
+        time:  answer within TIME_OK_FR of any matching event (class and,
+               if given, near_xy/radius constraint);
+        class: at least one event of the ANSWERED class satisfies the
+               query's place/time constraints.
+
+        gt_kwargs = the same kwargs the exact-table scoring call used, so the
+        window/radius conventions match the modal scoring exactly."""
+        if ans is None:
+            return False
+        kw = gt_kwargs
+        if kind == "pos":
+            m = self._mask(kw.get("what"), kw.get("when"))
+            if not m.any():
+                return False
+            d = np.hypot(self.ev["x"][m] - ans[0], self.ev["y"][m] - ans[1])
+            return bool((d <= POS_OK_M).any())
+        if kind == "time":
+            m = self._mask(kw.get("what"))
+            if kw.get("near_xy") is not None:
+                d = np.hypot(self.ev["x"] - kw["near_xy"][0],
+                             self.ev["y"] - kw["near_xy"][1])
+                m &= (d <= kw.get("radius", 1.0))
+            if not m.any():
+                return False
+            return bool((np.abs(self.ev["t"][m] - float(ans)) <= TIME_OK_FR).any())
+        # class: any event of the answered class within the constraints
+        m = self._mask(ans, kw.get("when"))
+        if kw.get("near_xy") is not None:
+            d = np.hypot(self.ev["x"] - kw["near_xy"][0],
+                         self.ev["y"] - kw["near_xy"][1])
+            m &= (d <= kw.get("radius", 1.0))
+        return bool(m.any())
 
 
 # ==========================================================================
@@ -292,13 +359,19 @@ class TraceSet:
 
     def __init__(self, hd_dim, seed, pos_length_scale, time_length_scale,
                  classes, bounds, t_max, grid=72,
-                 time_scales=None, time_combine="bundle"):
+                 time_scales=None, time_combine="bundle",
+                 class_seed_mix=None):
         self.hd = hd_dim
         self.seed = seed
         self.enc = ClassroomEncoders(hd_dim, seed + 100,
                                      pos_length_scale, time_length_scale)
         self.classes = list(classes)
-        self.C = {c: Phasor(dim=hd_dim, seed=_class_seed(c)).values
+        # class_seed_mix=None -> historical _class_seed(name) atoms (all
+        # logged artifacts); an int mixes it into the md5 so replicates
+        # (e.g. sweep seeds) draw independent class codebooks (FIX 4).
+        self.class_seed_mix = class_seed_mix
+        self.C = {c: Phasor(dim=hd_dim,
+                            seed=_class_seed_mixed(c, class_seed_mix)).values
                   for c in self.classes}
         self.M = {k: np.zeros(hd_dim, np.complex128)
                   for k in ("what_where", "what_when", "where_when", "event")}
@@ -390,20 +463,56 @@ class TraceSet:
                          for w in self.omega_scales]).mean(axis=0)
 
     # ---- null calibration (abstention) -------------------------------------
-    def calibrate(self, ev, n_null=200, seed=12345):
-        """Null peak-similarity distribution per decode type.
+    # v2 calibration cells (FIX 2, tracker entry (r)): one null distribution
+    # per (decode, trace routed to, probe kind). The v1 scheme stored ONE null
+    # per decode type, always measured on M_event with point probes — that
+    # null was then misapplied to marginal-trace queries (marginals have
+    # higher coherent mass -> z inflated) and to range-kernel queries (the
+    # range kernel is not unit-modulus and shrinks similarities ~4x -> z
+    # deflated). Every (trace, probe-kind) combination the QueryRouter can
+    # actually produce gets its own cell:
+    CALIB_CELLS = (
+        ("where", "event", "point"), ("where", "event", "range"),
+        ("where", "what_where", "none"),
+        ("where", "where_when", "point"), ("where", "where_when", "range"),
+        ("when", "event", "none"), ("when", "what_when", "none"),
+        ("when", "where_when", "none"),
+        ("what", "event", "point"), ("what", "event", "range"),
+        ("what", "what_where", "none"),
+        ("what", "what_when", "point"), ("what", "what_when", "range"),
+    )
 
-        Half the probes are MISMATCHED vocabulary pairings (real class /
-        time / place drawn from the events but re-paired so the exact table
-        has no answer: class x time with no event of that class within
-        2*median(time_scales) frames; class x place with no event of that
-        class within 2*pos_l; place x time with no event nearby in both).
-        The other half are random-phase phasor residuals scaled to the RMS
-        component amplitude of the event trace (a unit-amplitude random
-        probe would sit ~30x above any real residual and would swamp the
-        statistics — measured before this scaling was added). Peak similarity
-        of the same argmax decode is recorded; mean/std/p95/p99 are stored
-        and used by QueryRouter for z-scores."""
+    def calibrate(self, ev, n_null=200, seed=12345, range_frac=1.0 / 3.0):
+        """Per-(trace, probe-kind) null peak-similarity distributions (v2).
+
+        For each cell in CALIB_CELLS, half the probes are MISMATCHED keys
+        routed through the SAME trace + probe kind as a real query:
+
+          * event-trace cells re-pair real vocabulary items with a guard so
+            the exact table has no answer (class x time with no event of the
+            class within 2*median(time_scales) of the probe time / window;
+            class x place with none within 2*pos_l; place x time with none
+            near in both) — the v1 machinery, now per cell;
+          * marginal-trace cells where every real key HAS an answer (every
+            class has events; the robot is always somewhere) use FAKE keys:
+            a random unit phasor in place of the class atom / place / time
+            vector (the fake-class-null approach from
+            moved_object_synthetic), or a range kernel built on random
+            frequencies for range cells;
+          * range cells use a REPRESENTATIVE window width W = range_frac *
+            t_max (default 1/3, matching the bench windows). NOTE the
+            residual width-dependence: the range kernel keeps fewer
+            components as the window widens, so nulls calibrated at W are
+            approximate for very different widths — re-calibrate range_frac
+            if the deployed query mix changes.
+
+        The other half are random-phase residuals scaled to THAT trace's RMS
+        component amplitude (v1 used the event trace's RMS for all cells),
+        multiplied by a representative probe kernel for point/range cells so
+        range-kernel shrinkage is included in the null.
+
+        Storage: dict keyed "decode|trace|kind" (+ "_meta"). QueryRouter
+        falls back to legacy per-decode keys for old .pt files."""
         rng = np.random.RandomState(seed)
         router = QueryRouter(self)
         cls_arr = np.array(ev["class"])
@@ -411,54 +520,131 @@ class TraceSet:
         n_ev = len(t_arr)
         t_guard = 2.0 * float(np.median(self.time_scales))
         r_guard = 2.0 * float(self.enc.pos_l)
-        rms = float(np.sqrt(np.mean(np.abs(self.M["event"]) ** 2)))
+        t_max = float(self.t_max)
+        W = float(range_frac) * t_max
+        bx = (float(x_arr.min()), float(x_arr.max()))
+        by = (float(y_arr.min()), float(y_arr.max()))
+        rms = {k: float(np.sqrt(np.mean(np.abs(v) ** 2)))
+               for k, v in self.M.items()}
+        med_ell = float(np.median(self.time_scales))
 
-        def null_sims(decode):
-            sims, n_mis, tries = [], n_null // 2, 0
-            while len(sims) < n_mis and tries < n_mis * 100:
-                tries += 1
+        def rand_phasor():
+            return np.exp(1j * rng.uniform(0, 2 * np.pi, self.hd))
+
+        def rand_start():
+            return float(rng.uniform(0.0, max(t_max - W, 1e-6)))
+
+        def fake_range_kernel():
+            # wrong-key range kernel: fresh random frequencies at the median
+            # time length-scale, same window width as real range probes
+            w = rng.uniform(-np.pi, np.pi, self.hd) / med_ell
+            a = rand_start()
+            return _range_kernel(w, a, a + W)
+
+        def decode_sim(decode, residual, probe_time=None):
+            if decode == "where":
+                return router._decode_grid(residual, probe_time=probe_time)[1]
+            if decode == "when":
+                return router._decode_time(residual)[1]
+            return router._decode_class(residual, probe_time=probe_time)[1]
+
+        def mismatch_probe(decode, trace, kind):
+            """One mismatched/fake-key (residual, probe_time), or None to
+            retry (guard rejected the draw)."""
+            if trace == "event":
                 i, j = rng.randint(n_ev), rng.randint(n_ev)
                 c = cls_arr[i]
                 mc = cls_arr == c
-                if decode == "where":
+                if decode == "where" and kind == "point":
                     t = t_arr[j]
                     if np.any(np.abs(t_arr[mc] - t) <= t_guard):
-                        continue
-                    res = self.M["event"] / self.C[c]
-                    _, s = router._decode_grid(res, probe_time=self.ctx_time_vec(t))
-                elif decode == "when":
+                        return None
+                    return (self.M["event"] / self.C[c],
+                            self.ctx_time_vec(t))
+                if decode == "where" and kind == "range":
+                    a = rand_start()
+                    if np.any((t_arr[mc] >= a - t_guard)
+                              & (t_arr[mc] <= a + W + t_guard)):
+                        return None
+                    return self.M["event"] / self.C[c], self.time_range(a, a + W)
+                if decode == "when":
                     xx, yy = x_arr[j], y_arr[j]
                     if np.any(np.hypot(x_arr[mc] - xx, y_arr[mc] - yy) <= r_guard):
-                        continue
-                    res = self.M["event"] / self.C[c] / self.enc.ctx_pos(xx, yy).values
-                    _, s = router._decode_time(res)
-                else:  # what
+                        return None
+                    return (self.M["event"] / self.C[c]
+                            / self.enc.ctx_pos(xx, yy).values, None)
+                if decode == "what" and kind == "point":
                     xx, yy, t = x_arr[i], y_arr[i], t_arr[j]
                     near = ((np.hypot(x_arr - xx, y_arr - yy) <= r_guard)
                             & (np.abs(t_arr - t) <= t_guard))
                     if near.any():
-                        continue
-                    res = self.M["event"] / self.enc.ctx_pos(xx, yy).values
-                    _, s = router._decode_class(res, probe_time=self.ctx_time_vec(t))
-                sims.append(s)
-            for _ in range(n_null - len(sims)):  # random phasors at trace RMS
-                res = rms * np.exp(1j * rng.uniform(0, 2 * np.pi, self.hd))
-                if decode == "where":
-                    _, s = router._decode_grid(res)
-                elif decode == "when":
-                    _, s = router._decode_time(res)
-                else:
-                    _, s = router._decode_class(res)
-                sims.append(s)
-            return np.array(sims)
+                        return None
+                    return (self.M["event"] / self.enc.ctx_pos(xx, yy).values,
+                            self.ctx_time_vec(t))
+                if decode == "what" and kind == "range":
+                    xx, yy = x_arr[i], y_arr[i]
+                    a = rand_start()
+                    near = ((np.hypot(x_arr - xx, y_arr - yy) <= r_guard)
+                            & (t_arr >= a - t_guard) & (t_arr <= a + W + t_guard))
+                    if near.any():
+                        return None
+                    return (self.M["event"] / self.enc.ctx_pos(xx, yy).values,
+                            self.time_range(a, a + W))
+            if trace == "what_where":
+                if decode == "where":  # fake class atom (never stored)
+                    return self.M["what_where"] / rand_phasor(), None
+                # decode == "what": place with no event within the guard
+                p = (float(rng.uniform(*bx)), float(rng.uniform(*by)))
+                if np.any(np.hypot(x_arr - p[0], y_arr - p[1]) <= r_guard):
+                    return None
+                return self.M["what_where"] / self.enc.ctx_pos(*p).values, None
+            if trace == "what_when":
+                if decode == "when":  # fake class atom
+                    return self.M["what_when"] / rand_phasor(), None
+                # decode == "what": fake time key (every real t has events)
+                if kind == "range":
+                    return self.M["what_when"], fake_range_kernel()
+                return self.M["what_when"], rand_phasor()
+            # trace == "where_when"
+            if decode == "when":  # place with no event within the guard
+                p = (float(rng.uniform(*bx)), float(rng.uniform(*by)))
+                if np.any(np.hypot(x_arr - p[0], y_arr - p[1]) <= r_guard):
+                    return None
+                return self.M["where_when"] / self.enc.ctx_pos(*p).values, None
+            # decode == "where": fake time key (the robot is always somewhere)
+            if kind == "range":
+                return self.M["where_when"], fake_range_kernel()
+            return self.M["where_when"], rand_phasor()
 
         self.null_calib = {}
-        for d in ("where", "when", "what"):
-            s = null_sims(d)
-            self.null_calib[d] = {
+        for decode, trace, kind in self.CALIB_CELLS:
+            sims, n_mis, tries = [], n_null // 2, 0
+            while len(sims) < n_mis and tries < n_mis * 100:
+                tries += 1
+                probe = mismatch_probe(decode, trace, kind)
+                if probe is None:
+                    continue
+                sims.append(decode_sim(decode, *probe))
+            n_mis_got = len(sims)
+            for _ in range(n_null - len(sims)):  # random residuals @ trace RMS
+                res = rms[trace] * rand_phasor()
+                if kind == "point":
+                    pt = self.ctx_time_vec(float(rng.uniform(0.0, t_max)))
+                elif kind == "range":
+                    a = rand_start()
+                    pt = self.time_range(a, a + W)
+                else:
+                    pt = None
+                sims.append(decode_sim(decode, res, pt))
+            s = np.array(sims)
+            self.null_calib[f"{decode}|{trace}|{kind}"] = {
                 "mean": float(s.mean()), "std": float(max(s.std(), 1e-12)),
                 "p95": float(np.percentile(s, 95)),
-                "p99": float(np.percentile(s, 99)), "n": int(len(s))}
+                "p99": float(np.percentile(s, 99)), "n": int(len(s)),
+                "n_mismatch": int(n_mis_got)}
+        self.null_calib["_meta"] = {"version": 2, "n_null": int(n_null),
+                                    "range_frac": float(range_frac),
+                                    "range_width_fr": float(W)}
         return self.null_calib
 
     # ---- memory accounting ------------------------------------------------
@@ -487,6 +673,8 @@ class TraceSet:
                      "time_combine": self.time_combine,
                      "class_weighting": self.class_weighting,
                      "events_name": self.events_name,
+                     "class_seed_mix": (None if self.class_seed_mix is None
+                                        else int(self.class_seed_mix)),
                      "null_calib": self.null_calib},
         }, path)
 
@@ -497,7 +685,8 @@ class TraceSet:
         ts = cls(m["hd"], m["seed"], m["pos_l"], m["time_l"], m["classes"],
                  tuple(m["bounds"]), m["t_max"], grid=grid,
                  time_scales=m.get("time_scales"),
-                 time_combine=m.get("time_combine", "bundle"))
+                 time_combine=m.get("time_combine", "bundle"),
+                 class_seed_mix=m.get("class_seed_mix"))
         ts.M = {k: v.numpy() for k, v in d["M"].items()}
         ts.wsum = m["wsum"]
         ts.n_events = m["n_events"]
@@ -579,12 +768,14 @@ class QueryRouter:
         t0 = time.perf_counter()
         C = tr.C[what] if what is not None else None
         S = tr.enc.ctx_pos(*where).values if where is not None else None
-        T_probe = None
+        T_probe, probe_kind = None, "none"
         if when is not None:
             if isinstance(when, (tuple, list)):
                 T_probe = tr.time_range(float(when[0]), float(when[1]))
+                probe_kind = "range"
             else:
                 T_probe = tr.ctx_time_vec(float(when))
+                probe_kind = "point"
         t1 = time.perf_counter()
 
         if decode == "where":
@@ -623,17 +814,25 @@ class QueryRouter:
             t2 = time.perf_counter()
             answer, sim = self._decode_class(residual, probe_time=T_probe)
 
-        return self._pack(answer, sim, trace, decode, t0, t1, t2)
+        return self._pack(answer, sim, trace, decode, probe_kind, t0, t1, t2)
 
-    def _pack(self, answer, sim, trace, decode, t0, t1, t2):
+    def _pack(self, answer, sim, trace, decode, probe_kind, t0, t1, t2):
         t3 = time.perf_counter()
-        z, confident = None, None
+        z, confident, null_used = None, None, None
         calib = self.tr.null_calib
-        if calib and decode in calib:
-            c = calib[decode]
-            z = float((sim - c["mean"]) / max(c["std"], 1e-12))
-            confident = bool(z >= self.z_threshold)
+        if calib:
+            key = f"{decode}|{trace}|{probe_kind}"
+            if key in calib:            # v2: per-(trace, probe-kind) null
+                c, null_used = calib[key], key
+            elif decode in calib:       # legacy .pt: one null per decode type
+                c, null_used = calib[decode], f"legacy:{decode}"
+            else:
+                c = None
+            if c is not None:
+                z = float((sim - c["mean"]) / max(c["std"], 1e-12))
+                confident = bool(z >= self.z_threshold)
         info = {"trace": trace, "sim": sim, "z": z, "confident": confident,
+                "null": null_used,
                 "ms_encode": (t1 - t0) * 1e3,
                 "ms_unbind": (t2 - t1) * 1e3,
                 "ms_decode": (t3 - t2) * 1e3,
@@ -707,11 +906,12 @@ def _class_weights(ev, mode):
 
 def _build_traceset(ev, hd_dim, seed, pos_l, time_l, grid,
                     time_scales=None, time_combine="bundle", n_null=200,
-                    class_weighting="conf"):
+                    class_weighting="conf", class_seed_mix=None):
     classes = sorted(set(ev["class"]))
     bounds = (ev["x"].min(), ev["x"].max(), ev["y"].min(), ev["y"].max())
     tr = TraceSet(hd_dim, seed, pos_l, time_l, classes, bounds, ev["t"].max(),
-                  grid=grid, time_scales=time_scales, time_combine=time_combine)
+                  grid=grid, time_scales=time_scales, time_combine=time_combine,
+                  class_seed_mix=class_seed_mix)
     tr.class_weighting = str(class_weighting)
     w = _class_weights(ev, class_weighting)
     for i in range(len(ev["t"])):
@@ -729,7 +929,8 @@ def cmd_build(args):
                          time_scales=_parse_scales(args.time_scales),
                          time_combine=args.time_combine,
                          n_null=args.null_samples,
-                         class_weighting=args.class_weighting)
+                         class_weighting=args.class_weighting,
+                         class_seed_mix=args.class_seed_mix)
     tr.events_name = args.events_name
     path = os.path.join(args.out_dir, args.traces_name)
     tr.save(path)
@@ -739,10 +940,17 @@ def cmd_build(args):
           f"class_weighting={tr.class_weighting}, events={args.events_name}")
     print("memory accounting (bytes):", json.dumps(mem, indent=1))
     if tr.null_calib:
-        print("null calibration (peak-sim distribution of no-answer probes):")
-        for d, c in tr.null_calib.items():
-            print(f"  {d:5s}: mean={c['mean']:+.5f} std={c['std']:.5f} "
-                  f"p95={c['p95']:+.5f} p99={c['p99']:+.5f} (n={c['n']})")
+        meta = tr.null_calib.get("_meta", {})
+        print("null calibration (peak-sim distribution of no-answer probes; "
+              f"v{meta.get('version', 1)}, per decode|trace|probe-kind"
+              + (f", range width {meta.get('range_width_fr', 0):.0f} fr"
+                 if meta else "") + "):")
+        for d, c in sorted(tr.null_calib.items()):
+            if d == "_meta":
+                continue
+            print(f"  {d:22s}: mean={c['mean']:+.5f} std={c['std']:.5f} "
+                  f"p95={c['p95']:+.5f} p99={c['p99']:+.5f} "
+                  f"(n={c['n']}, mismatched {c.get('n_mismatch', '?')})")
     print(f"saved {path}")
 
 
@@ -779,9 +987,40 @@ def _fmt(v):
     return str(v)
 
 
+def _gt_answer(table, gt, pos_bw=GT_POS_BW, time_bw=GT_TIME_BW):
+    """Evaluate a recorded ground-truth spec (fn, kwargs) at a bandwidth.
+    Class queries have no KDE (conf-sum within radius/window) — bw-free."""
+    fn, kw = gt
+    if fn == "where":
+        return table.where(**kw, bw=pos_bw)
+    if fn == "when":
+        return table.when(**kw, bw=time_bw)
+    return table.what(**kw)
+
+
+def _score_answer(kind, ans, exact):
+    """(err_str, correct_bool_or_None) under the standard thresholds."""
+    if exact is None:
+        return "n/a (no events)", None
+    if kind == "pos":
+        e = np.hypot(ans[0] - exact[0], ans[1] - exact[1])
+        return f"{e:.2f} m", bool(e <= POS_OK_M)
+    if kind == "time":
+        e = abs(ans - exact)
+        return f"{e:.0f} fr", bool(e <= TIME_OK_FR)
+    correct = ans == exact
+    return ("OK" if correct else f"got {ans} vs {exact}"), correct
+
+
 def _bench_battery(router, table, ev):
     """The 21-query battery. Returns structured rows (one per query) with
-    error, correctness (pos<=1 m, time<=40 fr, class exact), sim, z, ms."""
+    error, correctness (pos<=1 m, time<=40 fr, class exact), sim, z, ms.
+
+    Each row also records its ground-truth spec ("gt": (fn, kwargs)) so the
+    SAME answers can be re-scored under other KDE bandwidths and under the
+    bandwidth-free supported criterion (FIX 1) — query construction (which
+    reads modal answers from the table, e.g. tq below) is pinned to the
+    default bandwidths so the battery itself never changes."""
     tr = router.tr
     freq = defaultdict(float)
     for c, cf in zip(ev["class"], ev["conf"]):
@@ -792,62 +1031,110 @@ def _bench_battery(router, table, ev):
 
     rows = []
 
-    def run(desc, kind, decode, vsa_args, exact_answer):
+    def run(desc, kind, decode, vsa_args, gt):
         ans, info = router.query(decode, **vsa_args)
-        correct = None
-        if exact_answer is None:
-            err = "n/a (no events)"
-        elif kind == "pos":
-            e = np.hypot(ans[0] - exact_answer[0], ans[1] - exact_answer[1])
-            err, correct = f"{e:.2f} m", bool(e <= POS_OK_M)
-        elif kind == "time":
-            e = abs(ans - exact_answer)
-            err, correct = f"{e:.0f} fr", bool(e <= TIME_OK_FR)
-        else:
-            correct = ans == exact_answer
-            err = "OK" if correct else f"got {ans} vs {exact_answer}"
+        exact_answer = _gt_answer(table, gt)
+        err, correct = _score_answer(kind, ans, exact_answer)
         rows.append({"desc": desc, "kind": kind, "trace": info["trace"],
                      "ans": ans, "exact": exact_answer, "err": err,
                      "correct": correct, "sim": info["sim"], "z": info["z"],
-                     "confident": info["confident"], "ms": info["ms_total"]})
+                     "confident": info["confident"], "ms": info["ms_total"],
+                     "gt": gt, "null": info.get("null")})
 
     for c in top:
         # Q1 where(what) all-time  [marginal what_where]
         run(f"where({c}) all-time", "pos", "where", dict(what=c),
-            table.where(what=c))
+            ("where", dict(what=c)))
         # Q2 when(what)            [marginal what_when]
-        run(f"when({c})", "time", "when", dict(what=c), table.when(what=c))
+        run(f"when({c})", "time", "when", dict(what=c), ("when", dict(what=c)))
         # Q7 where(what, when-point) [conjunctive event trace]
         tq = table.when(what=c)
         if tq is not None:
             run(f"where({c}, t={tq:.0f})", "pos", "where",
-                dict(what=c, when=tq), table.where(what=c, when=(tq - 40, tq + 40)))
+                dict(what=c, when=tq),
+                ("where", dict(what=c, when=(tq - 40, tq + 40))))
         # Q10 where(what, when-range) [probe-side range kernel]
         for w in wins[:2]:
             run(f"where({c}, t in {w[0]:.0f}:{w[1]:.0f})", "pos", "where",
-                dict(what=c, when=w), table.where(what=c, when=w))
+                dict(what=c, when=w), ("where", dict(what=c, when=w)))
     if "chair" in tr.classes:
         p = table.where(what="chair")
         # Q3 what(where)  [marginal what_where]
         run(f"what({_fmt(p)})", "class", "what", dict(where=p),
-            table.what(near_xy=p, radius=0.8))
+            ("what", dict(near_xy=p, radius=0.8)))
         # Q9 what(where, when-point) [event trace]
         tq = table.when(what="chair", near_xy=p)
         run(f"what({_fmt(p)}, t={tq:.0f})", "class", "what",
             dict(where=p, when=tq),
-            table.what(near_xy=p, when=(tq - 60, tq + 60), radius=0.8))
+            ("what", dict(near_xy=p, when=(tq - 60, tq + 60), radius=0.8)))
         # Q8 when(what, where) [event trace]
         run(f"when(chair, {_fmt(p)})", "time", "when",
             dict(what="chair", where=p),
-            table.when(what="chair", near_xy=p, radius=0.8))
+            ("when", dict(what="chair", near_xy=p, radius=0.8)))
     # Q6 where(when-point)  [marginal where_when]
     tq = float(t_hi * 0.12)
     run(f"where(t={tq:.0f})", "pos", "where", dict(when=tq),
-        table.where(when=(tq - 20, tq + 20)))
+        ("where", dict(when=(tq - 20, tq + 20))))
     # Q5 what(when-range)   [marginal what_when + range kernel]
     run(f"what(t in {wins[0][0]:.0f}:{wins[0][1]:.0f})", "class", "what",
-        dict(when=wins[0]), table.what(when=wins[0]))
+        dict(when=wins[0]), ("what", dict(when=wins[0])))
     return rows
+
+
+def _gt_bandwidth_report(rows, table, bw_list):
+    """FIX 1 (tracker entry (r)): the ground truth was estimator-matched —
+    ExactEventTable's KDE bandwidths equal the FPE length scales, so table
+    and memory could mode-flip together. Re-score the SAME 21 answers (a)
+    against ground-truth tables at each position bandwidth in bw_list (time
+    bandwidth scaled proportionally: time_bw = GT_TIME_BW * bw/GT_POS_BW)
+    and (b) under a bandwidth-free 'supported' criterion (within POS_OK_M /
+    TIME_OK_FR of ANY event satisfying the query constraints)."""
+    print(f"\n=== ground-truth bandwidth sensitivity "
+          f"(same answers, re-scored) ===")
+    per_bw = {}
+    for bw in bw_list:
+        tb = GT_TIME_BW * bw / GT_POS_BW
+        per_bw[bw] = []
+        for r in rows:
+            exact = _gt_answer(table, r["gt"], pos_bw=bw, time_bw=tb)
+            _, correct = _score_answer(r["kind"], r["ans"], exact)
+            per_bw[bw].append(correct)
+    supp = [table.supported(r["kind"], r["ans"], r["gt"][1]) for r in rows]
+
+    hdr = (["query", "conf"] + [f"bw={bw:g}" for bw in bw_list] + ["supported"])
+    out = []
+    flips = []
+    for i, r in enumerate(rows):
+        vals = [per_bw[bw][i] for bw in bw_list]
+        marks = ["-" if v is None else ("ok" if v else "WRONG") for v in vals]
+        sm = "ok" if supp[i] else "UNSUP"
+        conf = "-" if r["confident"] is None else ("y" if r["confident"] else "abst")
+        out.append([r["desc"], conf] + marks + [sm])
+        scored = [v for v in vals if v is not None]
+        if len(set(scored)) > 1:
+            flips.append(r["desc"])
+    widths = [max(len(str(x[i])) for x in out + [hdr]) for i in range(len(hdr))]
+    line = "  ".join(h.ljust(w) for h, w in zip(hdr, widths))
+    print(line); print("-" * len(line))
+    for r in out:
+        print("  ".join(str(v).ljust(w) for v, w in zip(r, widths)))
+
+    n_scored = sum(1 for v in per_bw[bw_list[0]] if v is not None)
+    print("\naccuracy by ground-truth bandwidth (same answers):")
+    for bw in bw_list:
+        tb = GT_TIME_BW * bw / GT_POS_BW
+        nc = sum(1 for v in per_bw[bw] if v)
+        print(f"  pos bw {bw:4g} m / time bw {tb:4.1f} fr: "
+              f"{nc}/{n_scored} correct ({100.0 * nc / max(n_scored, 1):.0f}%)")
+    ns = sum(1 for s in supp if s)
+    print(f"  bandwidth-free supported criterion:  {ns}/{len(rows)} supported "
+          f"({100.0 * ns / len(rows):.0f}%)")
+    if flips:
+        print(f"  correctness FLIPS across bandwidths ({len(flips)}): "
+              + "; ".join(flips))
+    else:
+        print("  no query flips correctness across these bandwidths")
+    return per_bw, supp
 
 
 def _abstention_stats(rows):
@@ -863,9 +1150,16 @@ def _print_calib(tr):
     if not tr.null_calib:
         print("(no null calibration stored; rebuild to enable z/abstention)")
         return
+    if any("|" in d for d in tr.null_calib):  # v2 per-(trace, probe-kind)
+        print("null calib (v2, per decode|trace|probe-kind):")
+        for d, c in sorted(tr.null_calib.items()):
+            if d == "_meta":
+                continue
+            print(f"  {d:22s}: mean={c['mean']:+.5f} std={c['std']:.5f}")
+        return
     parts = [f"{d}: mean={c['mean']:+.5f} std={c['std']:.5f}"
              for d, c in tr.null_calib.items()]
-    print("null calib  " + " | ".join(parts))
+    print("null calib (LEGACY v1, one null per decode type)  " + " | ".join(parts))
 
 
 def cmd_bench(args):
@@ -899,6 +1193,10 @@ def cmd_bench(args):
               + (f" ({100*ncc/max(nc,1):.0f}%)" if nc else "")
               + f"; abstained {na}, of which wrong {naw}"
               + (f" (abstention precision {100*naw/max(na,1):.0f}%)" if na else ""))
+
+    if getattr(args, "gt_bandwidths", None):
+        bw_list = [float(v) for v in args.gt_bandwidths.split(",") if v.strip()]
+        _gt_bandwidth_report(rows, table, bw_list)
 
     print("\nvocabulary scan: which_moved(first-third, last-third), top 5")
     t_hi = ev["t"].max()
@@ -1116,6 +1414,10 @@ def main():
                     help="per-event bundle weights: conf (original), balanced "
                          "(conf/sqrt(class conf mass)), log (conf*log(1+K)/K); "
                          "see _class_weights")
+    pb.add_argument("--class-seed-mix", type=int, default=None,
+                    help="mix this int into every class-atom seed (md5 of "
+                         '"name|mix"); default None = historical '
+                         "_class_seed(name) atoms (all logged artifacts)")
 
     pq = sub.add_parser("query", help="single routed query")
     pq.add_argument("--decode", required=True, choices=["where", "when", "what"],
@@ -1134,6 +1436,12 @@ def main():
                          "in memory, report per-tercile where(what) recall")
     pn.add_argument("--bias-min-events", type=int, default=8,
                     help="tercile candidates need at least this many events")
+    pn.add_argument("--gt-bandwidths", default=None,
+                    help='comma list of ground-truth position KDE bandwidths '
+                         '(m), e.g. "0.4,0.75,1.5"; time bandwidth is scaled '
+                         "proportionally. Re-scores the same battery answers "
+                         "per bandwidth AND under a bandwidth-free supported "
+                         "criterion (estimator-matched-GT hardening)")
 
     for p in (pb, pn):  # build knobs (bench --compare/--bias-bench rebuild in memory)
         p.add_argument("--hd-dim", type=int, default=8192)

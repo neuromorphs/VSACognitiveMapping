@@ -37,6 +37,8 @@ Four tests (all run by the CLI; a scored report is printed):
      which_moved(loop1, loop2) must rank it #1 with displacement ~ the
      injected offset.
   4. LOOP-CLOSURE RECALL (content level) — PCA-64-whitened frame embeddings
+     (whitening statistics fit on the EVEN frames only and applied to the
+     held-out odd frames — fitting on all frames would leak)
      projected to hd=8192 phasors (seed 0), episodic memory
      mean(content_n * ctx_pos_n) over EVEN frames only; every ODD frame
      unbinds by its content and decodes position on a 56-grid. Position
@@ -380,9 +382,21 @@ def test4(out_dir, ev_orig, hd=8192, n_pca=64, seed=0, pos_l=0.75, grid_n=56):
     print("\n=== TEST 4: loop-closure recall (content level) ===")
     _fi, ts, emb = _load_embeddings(out_dir)
     n = emb.shape[0]
-    print(f"  {n} frame embeddings {emb.shape}; PCA-{n_pca} whiten -> "
-          f"random_project_to_phasor(hd={hd}, seed={seed})")
-    scores, _evr = pca_components(emb, n_pca)
+    even = np.arange(0, n, 2)
+    odd = np.arange(1, n, 2)
+    print(f"  {n} frame embeddings {emb.shape}; PCA-{n_pca} whiten "
+          f"(fit on EVEN frames only, applied to odd — no test-frame "
+          f"leakage) -> random_project_to_phasor(hd={hd}, seed={seed})")
+    # PCA whitening fit on the STORED (even) half only; the held-out odd
+    # frames are transformed with the even-fit statistics (mean, basis,
+    # per-component std) — pca_components on all frames would leak.
+    emb64 = emb.astype(np.float64)
+    k = min(n_pca, emb64.shape[1], len(even) - 1)
+    mu = emb64[even].mean(axis=0, keepdims=True)
+    _, _sv, vt = np.linalg.svd(emb64[even] - mu, full_matrices=False)
+    scores = (emb64 - mu) @ vt[:k].T
+    std_even = scores[even].std(axis=0, keepdims=True) + 1e-8
+    scores = scores / std_even
     z, _W = random_project_to_phasor(torch.from_numpy(scores).float(), hd,
                                      seed=seed)
     Z = z.numpy().astype(np.complex64)          # (n, hd) unit-modulus
@@ -393,8 +407,6 @@ def test4(out_dir, ev_orig, hd=8192, n_pca=64, seed=0, pos_l=0.75, grid_n=56):
     P = np.empty((n, hd), np.complex64)
     for i in range(n):
         P[i] = enc.ctx_pos(float(x[i]), float(y[i])).values
-    even = np.arange(0, n, 2)
-    odd = np.arange(1, n, 2)
     M = (Z[even].astype(np.complex128) * P[even]).mean(axis=0)
     print(f"  episodic memory: mean over {len(even)} EVEN frames of "
           f"content (x) ctx_pos; querying {len(odd)} ODD (revisit) frames")

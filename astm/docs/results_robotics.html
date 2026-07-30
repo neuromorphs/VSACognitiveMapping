@@ -1,0 +1,383 @@
+<title>ASTM Results for Roboticists — A Queryable Map in Fixed-Size Vectors</title>
+<style>
+  :root {
+    --bg: #faf9f6;
+    --fg: #1c1c1e;
+    --muted: #5f5f66;
+    --accent: #0b6e6e;
+    --accent-soft: #0b6e6e18;
+    --card: #ffffff;
+    --border: #dcdad4;
+    --eq-bg: #f0efe9;
+    --warn: #8a4b08;
+    --warn-bg: #8a4b0812;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c;
+      --fg: #e8e6e1;
+      --muted: #9a9aa2;
+      --accent: #5ecccc;
+      --accent-soft: #5ecccc1a;
+      --card: #1e2126;
+      --border: #33363d;
+      --eq-bg: #22252b;
+      --warn: #e0a860;
+      --warn-bg: #e0a86014;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181c; --fg: #e8e6e1; --muted: #9a9aa2; --accent: #5ecccc;
+    --accent-soft: #5ecccc1a; --card: #1e2126; --border: #33363d;
+    --eq-bg: #22252b; --warn: #e0a860; --warn-bg: #e0a86014;
+  }
+  :root[data-theme="light"] {
+    --bg: #faf9f6; --fg: #1c1c1e; --muted: #5f5f66; --accent: #0b6e6e;
+    --accent-soft: #0b6e6e18; --card: #ffffff; --border: #dcdad4;
+    --eq-bg: #f0efe9; --warn: #8a4b08; --warn-bg: #8a4b0812;
+  }
+  body { background: var(--bg); color: var(--fg);
+    font: 17px/1.65 Georgia, "Times New Roman", serif; margin: 0; }
+  main { max-width: 72ch; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
+  h1 { font-size: 1.9rem; line-height: 1.25; margin: 0 0 .4rem; }
+  h2 { font-size: 1.35rem; margin: 2.8rem 0 .8rem; border-bottom: 2px solid var(--accent-soft); padding-bottom: .3rem; }
+  h3 { font-size: 1.05rem; margin: 1.6rem 0 .5rem; }
+  p { margin: .8rem 0; max-width: 65ch; }
+  .kicker { font-family: system-ui, sans-serif; font-size: .78rem; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  .lede { font-size: 1.08rem; color: var(--fg); }
+  .cite { font-family: system-ui, sans-serif; font-size: .74rem; color: var(--muted); white-space: nowrap; }
+  .tablewrap { overflow-x: auto; margin: 1.2rem 0; }
+  table { border-collapse: collapse; font-family: system-ui, sans-serif; font-size: .84rem;
+    line-height: 1.45; min-width: 100%; }
+  th { text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); padding: .45rem .7rem; border-bottom: 2px solid var(--border); }
+  td { padding: .55rem .7rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  td.num, .num { font-variant-numeric: tabular-nums; }
+  .eq { background: var(--eq-bg); border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0;
+    padding: .7rem 1rem; margin: 1rem 0; font-family: "Cambria Math", Georgia, serif;
+    font-size: .98rem; overflow-x: auto; }
+  .eq small { display: block; font-family: system-ui, sans-serif; font-size: .74rem;
+    color: var(--muted); margin-top: .35rem; }
+  figure { margin: 1.6rem 0; }
+  figure img { max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 6px;
+    background: #fff; }
+  figcaption { font-family: system-ui, sans-serif; font-size: .78rem; color: var(--muted);
+    margin-top: .45rem; max-width: 65ch; }
+  .callout { background: var(--accent-soft); border-radius: 8px; padding: .9rem 1.1rem; margin: 1.2rem 0;
+    font-size: .95rem; }
+  .warnbox { background: var(--warn-bg); border-left: 3px solid var(--warn); border-radius: 0 6px 6px 0;
+    padding: .8rem 1.1rem; margin: 1.2rem 0; font-size: .93rem; }
+  ul { padding-left: 1.3rem; max-width: 65ch; }
+  li { margin: .45rem 0; }
+  strong { font-weight: 700; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+</style>
+
+<main>
+<p class="kicker">Results briefing · for a SLAM &amp; semantic-mapping audience · 2026-07-30</p>
+<h1>A queryable spatial–semantic–temporal memory in fixed-size vectors</h1>
+
+<p class="lede">We built a robot memory that stores every detection a Boston Dynamics
+Spot made during a classroom walk-through — what it saw, where, and when — inside a
+handful of <strong>fixed-size vectors</strong> (8,192 complex numbers each), and answers
+spatial-memory questions by algebra instead of database lookup. Place recognition,
+semantic object queries, "where was X at time t", change detection, decaying working
+memory for dynamic objects, free-text language queries, and calibrated
+self-doubt all run against the same vectors, in milliseconds, on CPU, on real
+Spot RGB-D + LIO-SAM data (2,478 frames). Why care: unlike a scene-graph or landmark
+database, the trace state <strong>does not grow with experience</strong> — 4,498 events
+occupy the same 256 KB as 500; the full map state (118 MB at D=4096) is dominated by
+decoder grids and codebooks, which scale with vocabulary and query resolution, not
+event count — queries are single vector operations, and the memory
+reports a calibrated confidence, including an honest "I don't know."</p>
+
+<h2>1 · The robotics questions it answers</h2>
+<p>Each row is a standard robot competency, the measured result on the Spot classroom
+dataset, and the tracker log entry it comes from (paper-plan progress log,
+entries a–p).</p>
+
+<div class="tablewrap">
+<table>
+<tr><th>Competency</th><th>The question</th><th>Measured result</th><th>Src</th></tr>
+<tr><td><strong>Place recognition / loop closure</strong></td>
+  <td>"Have I been here before?"</td>
+  <td class="num">Two-loop revisit battery: episodic memory built from loop-1 frames recalls loop-2 revisit positions at median <strong>0.08 m</strong>, p90 0.17 m, 100% &lt; 0.5 m (shuffled-content null: 4.35 m median, 9% &lt; 0.5 m). "When was I at this place?" decodes bimodally — both visits — at 5/5 test positions.</td>
+  <td class="cite">(log p)</td></tr>
+<tr><td><strong>Semantic mapping</strong></td>
+  <td>"Where are the chairs?"</td>
+  <td class="num">Chair query peak lands <strong>0.086 m</strong> from the largest detector-derived object cluster when classes are bound to depth-derived object positions — vs 2.11 m when bound to robot pose (which answers "where was it seen <em>from</em>"). Self-consistency against the same detections and poses — not independent survey ground truth.</td>
+  <td class="cite">(log n)</td></tr>
+<tr><td><strong>Episodic / spatio-temporal queries</strong></td>
+  <td>"Where was X at time t?"</td>
+  <td class="num">Conditional recall <strong>8–11 cm</strong>; time-<em>range</em> queries cost the same as time-point queries (closed-form range kernels), 14.5 ms grid decode.</td>
+  <td class="cite">(log b, g)</td></tr>
+<tr><td><strong>Change detection</strong></td>
+  <td>"What moved between visits?"</td>
+  <td class="num">Injected 1.68 m relocation of a TV between loops → "which_moved" ranks it <strong>#1</strong> and measures <strong>1.51 m</strong>; the unmodified control run stays below the significance gate (max 0.18 m) — no false alarms.</td>
+  <td class="cite">(log p)</td></tr>
+<tr><td><strong>Dynamic objects</strong></td>
+  <td>"Where is the person <em>now</em>?"</td>
+  <td class="num">Per-class decaying working memory tracks the person at <strong>0.12–0.51 m</strong> while fresh and reports an honest "forgotten" once evidence decays (weight ≈ 0), instead of hallucinating a stale position.</td>
+  <td class="cite">(log i)</td></tr>
+<tr><td><strong>Language grounding</strong></td>
+  <td>"Where's the cold storage for food?"</td>
+  <td class="num">Free-text sentence embeddings used <em>directly</em> as unbinding keys at query time (stored atoms are themselves text-derived, so no query-time codebook routing is needed) — localizing never-stored paraphrases at median <strong>0.17 m</strong>, 12/15 within 1 m ("luggage"→suitcase 0.03 m).</td>
+  <td class="cite">(log o)</td></tr>
+<tr><td><strong>Introspection</strong></td>
+  <td>"How sure are you?"</td>
+  <td class="num">Calibrated abstention with per-(trace, probe-kind) null distributions: AUROC <strong>0.905</strong> vs raw similarity 0.875 on a 544-query labeled battery — the null calibration adds genuine discrimination once nulls are matched to the query shape (an earlier shared-null version tied with raw similarity; fixed post-review, log s). Bench: <strong>15/16</strong> confident answers correct, <strong>4/4</strong> abstentions genuinely wrong (100% abstention precision).</td>
+  <td class="cite">(log g, l)</td></tr>
+</table>
+</div>
+
+<figure>
+  <img src="two_loop_experiment.png" alt="Two-loop revisit experiment: bimodal when-queries, cross-loop recall, injected-move detection">
+  <figcaption><strong>Loop-closure machinery test.</strong> A pseudo-second-loop
+  (frame interleaving) gives the memory revisit structure: "when was I here?" comes back
+  bimodal at both visit times, loop-1 content recalls loop-2 positions at 0.08 m median,
+  and an injected 1.68 m object move is detected at 1.51 m with a clean negative control. (log p)</figcaption>
+</figure>
+
+<figure>
+  <img src="semantic_query_chair_memory_object.png" alt="Chair semantic query heatmap against furniture ground truth">
+  <figcaption><strong>Semantic mapping.</strong> "Where are the chairs?" decoded from one
+  fixed-size trace; the peak sits 0.086 m from the largest furniture cluster — off the robot's
+  trajectory, where the chairs actually are. (log n)</figcaption>
+</figure>
+
+<figure>
+  <img src="moved_object_synthetic.png" alt="Synthetic moved-object detection result">
+  <figcaption><strong>Change detection (synthetic precursor).</strong> Relocating all
+  second-half TV detections by 1.68 m: the gated which-moved scan ranks TV #1 at 1.71 m
+  measured; control 0.38 m. The event trace is necessary — the timeless marginal is bimodal
+  and its argmax loses the old location. (log l)</figcaption>
+</figure>
+
+<figure>
+  <img src="working_memory_person.png" alt="Decaying working memory tracking a person">
+  <figcaption><strong>Dynamic objects.</strong> Per-class decay (person λ=0.9, furniture
+  λ=0.995): fresh sightings localized at 0.12–0.51 m, stale ones honestly flagged
+  "forgotten". Decay can also run on a distance clock — a paused robot keeps its memory
+  under the metre clock while the frame clock forgets. (log i, m)</figcaption>
+</figure>
+
+<figure>
+  <img src="language_query.png" alt="Language query results: free-text phrases localized on the map">
+  <figcaption><strong>Language grounding.</strong> Whitened MiniLM sentence latents act
+  directly as unbinding keys: "cutting tool for paper" finds the scissors at 0.11 m. Failures
+  are language-model-semantic (ambiguous phrases), not memory-mechanical. (log o)</figcaption>
+</figure>
+
+<h2>2 · How it works in one minute</h2>
+<p>Everything is one representation: a vector of 8,192 unit-length complex numbers —
+think 8,192 tiny <strong>clock hands</strong>, each frozen at some angle. Three
+operations do all the work:</p>
+
+<ul>
+<li><strong>Bind (⊗)</strong> — add the clock angles of two vectors, position by position.
+Binds "chair" to "at (3.2, 1.4)" into a single vector that resembles neither factor.
+The binding is exactly invertible; recovery from a superposition is approximate.</li>
+<li><strong>Bundle (Σ)</strong> — sum many bound vectors into <em>one</em> vector, like a
+multiple-exposure photograph. The vector stays the same size; recall just gets slightly noisier
+per additional item.</li>
+<li><strong>Unbind (⊘)</strong> — subtract the angles of a factor you know. The matching
+recording snaps into focus; everything else stays incoherent noise.</li>
+</ul>
+
+<div class="eq">
+M<sub>event</sub> = Σ<sub>i</sub> conf<sub>i</sub> · C<sub>i</sub> ⊗ S(x<sub>i</sub>) ⊗ T(t<sub>i</sub>)
+<small>The whole event log — every (class, place, time) detection — superimposed in one
+fixed-size vector. Continuous position and time are encoded by fractional power encoding,
+so nearby places get similar vectors.</small>
+</div>
+<div class="eq">
+"where was the chair at t?" → decode&nbsp; M<sub>event</sub> ⊘ (C<sub>chair</sub> ⊗ T(t)) &nbsp;over an (x, y) grid
+<small>One unbind, one similarity sweep: 8–11 cm answers in milliseconds. Ambiguity shows
+up as a multi-modal heatmap instead of hiding behind an argmax.</small>
+</div>
+
+<p>One measured design rule shapes the architecture: unbinding a triple-bound trace with
+only one known factor attenuates the answer <strong>22×</strong> (0.247 vs 0.011). So the
+system keeps <strong>four traces</strong> — class⊗place, class⊗time, place⊗time, and the
+full event trace — one per query shape, like secondary indexes. Marginal questions use the
+high-SNR marginal traces; only fully conditional questions touch the event trace.
+Writes fan out ×4, which is trivial. (log b; evidence table)</p>
+
+<figure>
+  <img src="event_binding_demo.png" alt="Bind/bundle/unbind event binding demonstration">
+  <figcaption><strong>The algebra in action.</strong> Bound events superimpose in one
+  vector; unbinding by any known factor recovers the others as a similarity map.</figcaption>
+</figure>
+
+<h2>3 · The load-bearing discovery: isotropy</h2>
+<p>The single most transferable lesson for anyone bolting learned features onto an
+associative memory: <strong>raw CNN embeddings are not ready for superposition.</strong>
+YOLOv8 frame features on this data have pairwise cosine similarity 0.76–1.00 (mean 0.88)
+and effective rank 8 of 256 — every frame "looks like" every other frame. Bundle hundreds
+of them and the shared component adds <em>coherently</em>: measured interference grows
+<strong>linearly with the number of stored items</strong> (fitted log-log slope 0.97
+over N=50→1,239) and recall collapses. PCA whitening (subtract the mean, decorrelate,
+equalize variance) buys a <strong>~22× interference reduction at every N</strong>
+(85× → 3.8× in per-item-signal units at the full stream) — a constant-factor win, not
+a scaling-law change: residual real scene correlations (whitened mean |cos| ≈ 0.07)
+keep growth near-linear (slope 0.86), which is exactly why <em>learned</em> isotropic
+encoders remain the next rung. Outcome: effective rank 8→64, heading recall
+<strong>28% → 98%</strong>.
+Prior VSA lineages used random atoms that are isotropic by construction, and
+learned-embedding anisotropy — with whitening as the fix — is established for language
+embeddings (Mu &amp; Viswanath 2018; Ethayarajh 2019; Su et al. 2021) and for learned
+HRR vectors (Ganesan et al. 2021). The new part here is the <strong>quantified
+anisotropy → associative-recall-collapse link on a deployed robot</strong>, plus a
+causal online estimator of the whitening statistics. (evidence table; demo explainer)</p>
+
+<figure>
+  <img src="crosstalk_scaling.png" alt="Crosstalk vs number of stored items, raw vs whitened, log-log with fitted slopes">
+  <figcaption><strong>Interference scaling, measured.</strong> Raw features grow
+  coherently (slope 0.97 ≈ linear in N); whitening buys a ~22× constant-factor
+  reduction but residual scene correlations keep growth near-linear (slope 0.86) —
+  the motivation for learned isotropic encoders as the next step. (log t)</figcaption>
+</figure>
+
+<p>Deployment version, measured: <strong>online causal whitening</strong> (streaming
+Welford mean/covariance) matches oracle-level isotropy by frame ≈300 and reaches
+near-oracle recall by the final third of the run (0.15 m vs oracle 0.09 m grid-decode
+L1). A frozen calibration lap does <em>not</em> suffice at any length (1.15–1.73 m), and
+EMA estimates are worse everywhere. One design law fell out: <strong>store codes as
+encoded — never re-encode stored content</strong>. Codes written under early statistics stay
+nearly orthogonal (sim 0.29) to re-encodings under final statistics, because degenerate
+eigen-subspaces keep rotating. (log k)</p>
+
+<figure>
+  <img src="online_whitening.png" alt="Online whitening convergence vs oracle">
+  <figcaption><strong>Whitening mid-mission.</strong> Causal streaming whitening converges
+  to oracle-level isotropy by t≈300 and near-oracle recall by the final third; frozen
+  calibration laps and EMA both lose. (log k)</figcaption>
+</figure>
+
+<h2>4 · Capacity and cost</h2>
+<p>A 60-cell sweep over dimension D ∈ 1024–16384 and stream length N ∈ 500–4498
+(3 seeds, 15-query battery, 7.7 min total) maps the trade-space. Accuracy climbs
+0.70 → 0.87 with D and saturates past D=4096 (+0.03 per doubling). There is
+<strong>no capacity cliff</strong> at the full 4,498-event stream: the smallest memory
+(D=1024) degrades only mildly (0.78 → 0.67) and D=16384 is best at full stream (0.91).
+The <strong>Pareto knee is D=4096</strong>: 0.80 battery accuracy, <strong>2.7 ms</strong>
+median query, <strong>118 MB honest map state</strong> — "honest" meaning it counts
+everything, including the precomputed decoder grids that dominate; the traces themselves
+are 256 KB. Confidence quality also scales: confident-correct rate climbs 0.84 → 0.94
+with D. (log j)</p>
+
+<div class="callout"><strong>The honesty note — with the crossover computed.</strong>
+At 4,500 events an exact event table (measured 79 B/event; indexed lookup 1.8 µs) beats
+this memory on raw accuracy and latency — as predicted, and it is baseline A in every
+benchmark run. The measured economics: the <em>traces</em> (256 KB, event-independent)
+already out-size the table beyond ~3,300 events; the <em>full</em> map state (dominated
+by decoder grids and codebooks, which scale with vocabulary and resolution, not events)
+wins on bytes only beyond ~2.7 M events, and an indexed table is never beaten on raw
+lookup latency at feasible scales (log t). The claim is therefore <em>not</em> economics
+against a database — it is the <strong>capability set no table has</strong>: conditional
+what/where/when in a single algebraic operation, free-text latents as query keys,
+calibrated self-doubt, and bounded trace growth with graceful (measured, not cliff-edge)
+degradation. (evidence table; working doc Q6)</div>
+
+<figure>
+  <img src="sweep/fig_pareto.png" alt="Pareto frontier: accuracy vs memory and latency across D">
+  <figcaption><strong>D×N sweep Pareto view.</strong> Knee at D=4096: 0.80 accuracy,
+  118 MB, 2.7 ms median query; no capacity cliff at N=4498. (log j)</figcaption>
+</figure>
+
+<h2>5 · Known limits, stated plainly</h2>
+<div class="warnbox">Everything above is measured; the following is what is <em>not</em> yet.</div>
+<ul>
+<li><strong>Position scaling needs our own staged collection with surveyed ground
+truth — required, not optional.</strong> The larger school_run1 dataset's own LIO-SAM
+odometry is diverged at km scale (~30 m building, pose spans of hundreds to thousands of
+metres, 209 jumps &gt; 5 m, longest clean segment 4–10 s); heading/time scaling numbers
+survive, position does not. (log h)</li>
+<li><strong>Comparison baselines B–D are unrun.</strong> Only baseline A (exact event
+table) exists; the deterministic temporal graph, LLM-as-query-compiler, and generative
+VLM baselines — plus ReMEmbR — are the biggest gap between what is measured and the
+paper's position. (evidence table)</li>
+<li><strong>The two-loop result is a machinery test, not a robustness result.</strong>
+The second loop is synthesized by frame interleaving — interleaved frames are ~0.1 s
+apart with near-identical appearance. It proves the revisit <em>algebra</em> works; real
+multi-loop data with viewpoint and lighting change has not been collected. (log p)</li>
+<li><strong>One room, one platform.</strong> The physical data is a single classroom loop
+(~7×6.5 m); place≈time confounds are only broken synthetically. (limitations ledger)</li>
+<li><strong>Approximate extrinsics.</strong> The camera extrinsic is approximated and
+object placement is not survey-grade, so centimetre-level numbers carry that floor.
+(classroom results ledger)</li>
+<li>Also open: loop-closure re-anchoring of an already-written map, persistent instance
+identity (needs a tracker front-end), multimodal-time mode-picking (the dominant residual
+decode error), and wiring online whitening into the deployment pipeline. (working doc)</li>
+</ul>
+
+<h2>6 · Context: three lineages, one algebra</h2>
+<p>This work deliberately unifies collaborating research lines that share the same
+vector algebra:</p>
+<ul>
+<li><strong>GC-VSA</strong> (Krausse, Neftci, Sommer, Renner — NICE 2025,
+arXiv:2503.08608) — the what⊗where⊗when factorized event memory with algebraic
+queries, demonstrated on synthetic data; our multi-trace system is that idea run on
+real robot perception.</li>
+<li><strong>VSA-OGM</strong> (Snyder et al., npj Unconventional Computing 2026) — the
+same vector family applied to occupancy grid mapping, reporting 400×/45× memory/latency
+gains over Bayesian Hilbert Maps <em>on that task</em> — those are their numbers on
+occupancy mapping, not ours.</li>
+<li><strong>HyperSpace</strong> (Snyder et al., arXiv:2604.15113) — a modular VSA
+spatial-encoding/benchmarking framework that independently reports cleanup/similarity
+search dominating runtime — matching our own finding that decode, not encode or unbind,
+dominates query latency.</li>
+<li><strong>le-marmotte VGPI</strong> — the complementary direction: lidar
+<em>localization</em> in one 2048-d vector (~16 KB map), 0.13 m one-shot SE(2)
+relocalization on this same Spot dataset family. One lineage localizes so another can
+remember. (log d)</li>
+</ul>
+
+<p>On the language-query side, the established prior art is the open-vocabulary map
+family — <strong>VLMaps</strong> (Huang et al., ICRA 2023), <strong>CLIP-Fields</strong>
+(Shafiullah et al., RSS 2023), and <strong>NLMap</strong> (Chen et al., ICRA 2023) —
+which already answer free-text "where is X?" queries against dense feature fields.
+What differentiates the memory here is <strong>fixed-size state</strong> and
+<strong>algebraic composition of the text key with time and place in a single
+unbind</strong> — a language query can be conditioned on a time window or a location
+with no extra machinery, against a state that does not grow with events.</p>
+
+<p class="lede" style="margin-top:2rem">One sentence to take away: <strong>a robot's
+semantic map, episodic memory, change log, and working memory can be operations in a
+single fixed-dimensional vector space</strong> — with bounded state, millisecond queries,
+calibrated confidence, and language access — and the condition that makes it work with
+real learned features is isotropy.</p>
+
+<h2>References</h2>
+<details>
+<summary style="cursor:pointer;font-family:system-ui,sans-serif;font-size:.9rem;color:var(--accent)">Full citation list (click to expand)</summary>
+<ul style="font-family:system-ui,sans-serif;font-size:.82rem;line-height:1.5">
+<li>Mu, J. &amp; Viswanath, P. All-but-the-Top: Simple and Effective Postprocessing for Word Representations. ICLR 2018. arXiv:1702.01417.</li>
+<li>Ethayarajh, K. How Contextual are Contextualized Word Representations? Comparing the Geometry of BERT, ELMo, and GPT-2 Embeddings. EMNLP 2019.</li>
+<li>Su, J. et al. Whitening Sentence Representations for Better Semantics and Faster Retrieval. 2021. arXiv:2103.15316.</li>
+<li>Ganesan, A. et al. Learning with Holographic Reduced Representations. NeurIPS 2021. arXiv:2109.02157.</li>
+<li>Plate, T. A. Holographic Reduced Representation: Distributed Representation for Cognitive Structures. CSLI Publications, 2003.</li>
+<li>Frady, E. P., Kleyko, D. &amp; Sommer, F. T. A Theory of Sequence Indexing and Working Memory in Recurrent Neural Networks. Neural Computation 30(6), 2018.</li>
+<li>Frady, E. P. et al. Computing on Functions Using Randomized Vector Representations. 2021. arXiv:2109.03429. (Fractional power encoding / Vector Function Architectures.)</li>
+<li>Komer, B., Stewart, T. C., Voelker, A. R. &amp; Eliasmith, C. A Neural Representation of Continuous Space Using Fractional Binding. CogSci 2019.</li>
+<li>Dumont, N. S.-Y., Furlong, P. M., Orchard, J. &amp; Eliasmith, C. Exploiting Semantic Information in a Spiking Neural SLAM System. Frontiers in Neuroscience 17:1190515, 2023.</li>
+<li>Kleyko, D. et al. A Survey on Hyperdimensional Computing aka Vector Symbolic Architectures, Parts I &amp; II. ACM Computing Surveys.</li>
+<li>Huang, C. et al. Visual Language Maps for Robot Navigation (VLMaps). ICRA 2023.</li>
+<li>Shafiullah, N. M. M. et al. CLIP-Fields: Weakly Supervised Semantic Fields for Robotic Memory. RSS 2023.</li>
+<li>Chen, B. et al. Open-Vocabulary Queryable Scene Representations for Real World Planning (NLMap). ICRA 2023.</li>
+<li>Anwar, A. et al. ReMEmbR: Building and Reasoning Over Long-Horizon Spatio-Temporal Memory for Robot Navigation. arXiv:2409.13682.</li>
+<li>Krausse, J., Neftci, E., Sommer, F. T. &amp; Renner, A. (GC-VSA.) NICE 2025 (IEEE). arXiv:2503.08608.</li>
+<li>Snyder, S. et al. (VSA-OGM.) npj Unconventional Computing 3:13, 2026. doi:10.1038/s44335-026-00052-w.</li>
+<li>Snyder, S. et al. HyperSpace. arXiv:2604.15113.</li>
+<li>Bremer, J. &amp; Orchard, J. arXiv:2412.00488.</li>
+</ul>
+</details>
+
+<hr>
+<p class="cite" style="white-space:normal">All numbers from the ASTM paper-plan tracker
+(progress log entries a–p, state-of-evidence table, 2026-07-30), the VSA cognitive-maps
+working document v2, and the demo explainer's measured-numbers table. Dataset: Boston
+Dynamics Spot, D455 RGB-D + LIO-SAM, classroom walk-through, 2,478 frames, 4,498
+events, 38 detected classes.</p>
+</main>

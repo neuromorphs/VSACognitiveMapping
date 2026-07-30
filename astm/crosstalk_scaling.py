@@ -1,0 +1,260 @@
+"""Crosstalk scaling: define the public 365x/27x figure and measure its
+N-dependence (coherent O(N) vs incoherent O(sqrt N) claim).
+
+Metric (THE definition — the quoted 365x/27x had none in code)
+--------------------------------------------------------------
+Bundle N bound pairs from the real classroom walk (YOLO frame embeddings ->
+content phasors c_i; LIO-SAM robot pose -> position phasors p_i, the same
+ClassroomEncoders FPE codes the pipeline uses):
+
+    M_N = (1/N) * sum_{i in S_N}  c_i (x) p_i ,   S_N = random N-subsample
+
+For each probe i in a fixed-size probe subset of S_N, unbind its position
+(positions are unit-modulus, so (/) p_i = * conj(p_i)) and correlate the
+residual with every stored content:
+
+    r_i         = M_N (/) p_i
+    ontarget_i  = Re< r_i, c_i >/D           (the recalled signal)
+    offtarget_i = mean_{j != i} | Re< r_i, c_j >/D |   (interference)
+
+    crosstalk(N) = mean_i offtarget_i / mean_i ontarget_i
+
+(ratio of means, the stable "simpler equivalent": under heavy interference
+individual ontarget_i can cross zero and a mean-of-ratios diverges).
+
+Secondary metric — because the MEASURED ontarget also contains the coherent
+interference mass, the growth law is cleanest against the exact per-item
+signal, which for the mean bundle is exactly 1/N (Re<c_i,c_i>/D = 1):
+
+    chi(N) = mean_i offtarget_i / (1/N) = N * mean_i offtarget_i
+
+chi(N) is the interference amplitude in units of one stored item's signal;
+this is the quantity the O(N)-coherent vs O(sqrt N)-incoherent claim is
+actually about:
+
+  * RAW content: the frame embeddings are anisotropic (mean pairwise cosine
+    ~0.9), so after projection the content phasors share a coherent
+    component; interference terms add IN PHASE -> chi ~ N^1 * rho
+    (coherent).
+  * PCA-WHITENED content (the pipeline's fix): content phasors are
+    quasi-orthogonal; interference terms add with random phases ->
+    chi ~ sqrt(N)-ish (incoherent), if residual content correlations
+    (consecutive frames genuinely look alike) are negligible.
+
+Both metrics are computed and fitted; the figure shows both panels.
+
+Both content variants come from outputs/classroom/embeddings.pt through the
+exact pipeline path (PCA-64 standardized scores vs raw embeddings, then
+random_project_to_phasor at hd=8192, seed 0). Whitening statistics are fit
+on the FULL walk once (as the pipeline's build stage does), then rows are
+subsampled.
+
+NOTE on the sweep upper end: the task/plan quotes "2478 (all frames)", but
+embeddings.pt holds the STRIDE-2 embed of the 2478-frame walk = 1239
+embedded frames. 1239 is therefore the honest "all frames" endpoint; the
+endpoint ratio is reported at N=1239.
+
+Outputs: fitted log-log slopes per content type, the N=1239 endpoint
+crosstalk values (compare against the quoted 365x/27x), and
+outputs/classroom/crosstalk_scaling.png.
+
+Usage (from repo root, needs outputs/classroom/embeddings.pt + HF pose cache):
+    python vsa_cognitive_mapping/crosstalk_scaling.py
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+
+import numpy as np
+import torch
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from vsa_cognitive_mapping.vsa import (  # noqa: E402
+    pca_components, random_project_to_phasor,
+)
+from vsa_cognitive_mapping.classroom_pipeline import (  # noqa: E402  (read-only)
+    ClassroomEncoders, _load_embeddings, load_poses_interpolated,
+)
+
+DEFAULT_OUT = os.path.join("outputs", "classroom")
+
+
+def content_variants(emb, hd, seed, n_pca):
+    """(raw, whitened) content phasor arrays, both (N, hd) complex128,
+    via the pipeline's exact projection path."""
+    z_raw, _ = random_project_to_phasor(
+        torch.from_numpy(np.ascontiguousarray(emb)).float(), d=hd, seed=seed)
+    k = min(n_pca, emb.shape[1], emb.shape[0] - 1)
+    scores, _ = pca_components(emb.astype(np.float64), n_components=k)
+    z_wht, _ = random_project_to_phasor(
+        torch.from_numpy(np.ascontiguousarray(scores)).float(), d=hd, seed=seed)
+    return (z_raw.numpy().astype(np.complex128),
+            z_wht.numpy().astype(np.complex128))
+
+
+def mean_offdiag_cos(C, n_sub, rng):
+    """Mean off-diagonal Re<c_i,c_j>/D over an n_sub-row subsample."""
+    idx = rng.choice(C.shape[0], size=min(n_sub, C.shape[0]), replace=False)
+    S = np.real(C[idx] @ np.conj(C[idx]).T) / C.shape[1]
+    off = S[~np.eye(len(idx), dtype=bool)]
+    return float(off.mean()), float(np.abs(off).mean())
+
+
+def crosstalk(C, P, sel, n_probe, rng):
+    """crosstalk(N) for one subsample sel (indices into C/P rows).
+
+    Returns (ratio, mean_on, mean_off)."""
+    D = C.shape[1]
+    M = (C[sel] * P[sel]).mean(axis=0)                      # (D,)
+    probes = sel if len(sel) <= n_probe else \
+        sel[rng.choice(len(sel), size=n_probe, replace=False)]
+    R = M[None, :] * np.conj(P[probes])                      # residuals (m, D)
+    S = np.real(R @ np.conj(C[probes]).T) / D                # (m, m) sims
+    on = np.diag(S).copy()
+    off = np.abs(S[~np.eye(len(probes), dtype=bool)]
+                 .reshape(len(probes), len(probes) - 1)).mean(axis=1)
+    mean_on, mean_off = float(on.mean()), float(off.mean())
+    return mean_off / mean_on, mean_on, mean_off
+
+
+def fit_slope(Ns, vals):
+    """Least-squares slope of log(vals) vs log(Ns)."""
+    lx, ly = np.log(np.asarray(Ns, float)), np.log(np.asarray(vals, float))
+    A = np.vstack([lx, np.ones_like(lx)]).T
+    (m, b), *_ = np.linalg.lstsq(A, ly, rcond=None)
+    return float(m), float(b)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--out-dir", default=DEFAULT_OUT)
+    ap.add_argument("--hd-dim", type=int, default=8192)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--n-pca", type=int, default=64)
+    ap.add_argument("--pos-length-scale", type=float, default=0.75)
+    ap.add_argument("--n-probe", type=int, default=200,
+                    help="probes per (N, seed) config")
+    ap.add_argument("--sub-seeds", type=int, nargs="+", default=[0, 1, 2])
+    ap.add_argument("--no-figure", action="store_true")
+    args = ap.parse_args()
+
+    _fi, ts, emb = _load_embeddings(args.out_dir)
+    N_all = len(ts)
+    x, y, _psi = load_poses_interpolated(ts)
+    print(f"{N_all} embedded frames (stride-2 of the 2478-frame walk); "
+          f"hd={args.hd_dim}")
+
+    C_raw, C_wht = content_variants(emb, args.hd_dim, args.seed, args.n_pca)
+    enc = ClassroomEncoders(args.hd_dim, args.seed + 100,
+                            args.pos_length_scale, 20.0)
+    P = np.empty((N_all, args.hd_dim), np.complex128)
+    for i in range(N_all):
+        P[i] = enc.ctx_pos(float(x[i]), float(y[i])).values
+
+    rng0 = np.random.RandomState(999)
+    for name, C in (("raw", C_raw), ("whitened", C_wht)):
+        mo, moa = mean_offdiag_cos(C, 300, rng0)
+        print(f"  {name:8s} content phasors: mean off-diag cos {mo:+.4f} "
+              f"(mean |cos| {moa:.4f})")
+    # embedding-space coherence for reference (the quoted ~0.88)
+    e = emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-9)
+    idx = rng0.choice(N_all, 300, replace=False)
+    Se = e[idx] @ e[idx].T
+    print(f"  raw EMBEDDING mean off-diag cos: "
+          f"{Se[~np.eye(300, dtype=bool)].mean():+.4f}")
+
+    Ns = [n for n in (50, 100, 200, 400, 800, 1600) if n < N_all] + [N_all]
+    results = {"raw": {}, "whitened": {}}
+    for name, C in (("raw", C_raw), ("whitened", C_wht)):
+        for n in Ns:
+            vals = []
+            for s in args.sub_seeds:
+                rng = np.random.RandomState(1000 * s + n)
+                sel = (np.arange(N_all) if n >= N_all
+                       else np.sort(rng.choice(N_all, size=n, replace=False)))
+                ratio, on, off = crosstalk(C, P, sel, args.n_probe, rng)
+                vals.append((ratio, on, off))
+            r = np.array([v[0] for v in vals])
+            chi = np.array([n * v[2] for v in vals])
+            results[name][n] = {"ratio_mean": float(r.mean()),
+                                "ratio_std": float(r.std()),
+                                "chi_mean": float(chi.mean()),
+                                "chi_std": float(chi.std()),
+                                "on": float(np.mean([v[1] for v in vals])),
+                                "off": float(np.mean([v[2] for v in vals]))}
+            print(f"  {name:8s} N={n:5d}: ratio={r.mean():6.2f}x "
+                  f"(+/-{r.std():.2f})  chi=N*off={chi.mean():8.2f}x "
+                  f"(+/-{chi.std():.2f})  mean_on={results[name][n]['on']:+.3e}")
+
+    print("\n---- log-log fits ~ N^slope ----")
+    slopes = {}
+    for metric in ("ratio_mean", "chi_mean"):
+        tag = "ratio (off/measured-on)" if metric == "ratio_mean" else \
+            "chi (off/per-item-signal)"
+        for name in ("raw", "whitened"):
+            m, b = fit_slope(Ns, [results[name][n][metric] for n in Ns])
+            slopes[(name, metric)] = m
+            print(f"  {tag:26s} {name:8s}: slope {m:+.3f}  "
+                  f"(coherent claim ~1.0, incoherent claim ~0.5)")
+
+    n_end = N_all
+    print(f"\n---- endpoint N={n_end} (all embedded frames; quoted figures "
+          f"were 365x raw / 27x whitened) ----")
+    for metric, tag in (("ratio_mean", "ratio"), ("chi_mean", "chi")):
+        r_raw = results["raw"][n_end][metric]
+        r_wht = results["whitened"][n_end][metric]
+        print(f"  {tag:6s}: raw {r_raw:8.2f}x   whitened {r_wht:8.2f}x   "
+              f"raw/whitened improvement {r_raw / r_wht:.1f}x")
+
+    if not args.no_figure:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        fig, axs = plt.subplots(1, 2, figsize=(13, 5.2), constrained_layout=True)
+        panels = [("ratio_mean", "ratio_std",
+                   "crosstalk ratio = mean|offtarget| / mean measured ontarget",
+                   "(a) task metric: recall-relative (measured ontarget "
+                   "absorbs the coherent mass)"),
+                  ("chi_mean", "chi_std",
+                   "chi(N) = N * mean|offtarget|  (per-item-signal units)",
+                   "(b) growth-law metric: interference vs one stored "
+                   "item's signal")]
+        for ax, (mk, sk, ylab, title) in zip(axs, panels):
+            for name, color in (("raw", "#b9772a"), ("whitened", "#0d7d88")):
+                mu = np.array([results[name][n][mk] for n in Ns])
+                sd = np.array([results[name][n][sk] for n in Ns])
+                ax.errorbar(Ns, mu, yerr=sd, fmt="o-", color=color, lw=1.6,
+                            capsize=3,
+                            label=f"{name}: slope {slopes[(name, mk)]:+.2f} "
+                                  f"(endpoint {mu[-1]:.2f}x)")
+                m, b = fit_slope(Ns, mu)
+                xs = np.array([Ns[0], Ns[-1]], float)
+                ax.plot(xs, np.exp(b) * xs ** m, "--", color=color, lw=0.9,
+                        alpha=0.6)
+            for sref, ls in ((1.0, ":"), (0.5, "-.")):
+                anchor = results["whitened"][Ns[0]][mk]
+                xs = np.array([Ns[0], Ns[-1]], float)
+                ax.plot(xs, anchor * (xs / Ns[0]) ** sref, ls, color="0.6",
+                        lw=0.9, label=f"reference slope {sref:g}")
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            ax.set_xlabel("N bundled (content (x) position) pairs")
+            ax.set_ylabel(ylab)
+            ax.set_title(title, fontsize=9)
+            ax.grid(alpha=0.3, which="both")
+            ax.legend(fontsize=8)
+        fig.suptitle(f"Crosstalk scaling, hd={args.hd_dim}, 3 subsample "
+                     f"seeds; endpoint N={n_end} = all stride-2 embedded "
+                     f"frames (quoted public figures: 365x/27x)", fontsize=10)
+        path = os.path.join(args.out_dir, "crosstalk_scaling.png")
+        fig.savefig(path, dpi=140)
+        print(f"saved {path}")
+
+
+if __name__ == "__main__":
+    main()

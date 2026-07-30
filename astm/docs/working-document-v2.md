@@ -92,7 +92,11 @@ high-SNR paths; the event trace serves conditional queries only.
    0.76–1.00, effective rank 8/256) → 365× coherent crosstalk → **PCA
    whitening first** drops it to 27× and takes heading recall from 28% to
    98%. This isotropy ⇔ capacity bridge is the paper's core scientific
-   claim. *Now also measured online:* causal Welford whitening converges to
+   claim — narrowed post-verification: anisotropy + whitening is established
+   for language embeddings (Mu & Viswanath 2018; Ethayarajh 2019; Su et al.
+   2021) and learned HRR vectors (Ganesan et al. NeurIPS 2021); ours is the
+   quantified anisotropy → associative-recall-collapse bridge measured on a
+   deployed robot, plus the causal online estimator. *Now also measured online:* causal Welford whitening converges to
    near-oracle recall by the final third of the walk (0.146 vs 0.090 m); a
    frozen calibration lap is insufficient at any K and EMA is worse — and a
    new design law fell out: **store codes as encoded, never re-encode stored
@@ -109,10 +113,11 @@ high-SNR paths; the event trace serves conditional queries only.
    `--place-mode object`) → "where IS the object". Both live in the demo.
 3. **"How should repeated observations be merged?"** → *Confidence-weighted
    bundling* for permanent memories; for dynamic objects, **per-class
-   λ-decay working memory** (person 0.9, furniture 0.995) with two novel
-   measured findings: rare-class mass imbalance requires per-class
-   normalization, and normalization without an evidence floor silently
-   cancels decay. Convergent with Krausse's distance-driven washout knob in
+   λ-decay working memory** (person 0.9, furniture 0.995). The
+   decaying-trace mechanism follows Frady, Kleyko & Sommer (2018); our
+   contributions are two measured engineering findings: rare-class mass
+   imbalance requires per-class normalization, and normalization without an
+   evidence floor silently cancels decay. Convergent with Krausse's distance-driven washout knob in
    le-marmotte (independent, both mid-July) — align terminology with him.
    *Extended (hybrid clocks):* the forgetting clock is now selectable —
    `--decay-per {event, frame, metre, both}` with

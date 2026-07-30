@@ -11,6 +11,17 @@ stream (``outputs/classroom/events.csv``) + the exact event table:
     events of that class in the window, probe positions outside the walk,
     and when(class, place) pairings at places the class never appears.
 
+GUARD BAND (FIX 3, evaluation-hardening 2026-07-30, default ON): the
+original "unanswerable" labels had NO guard band — an event of the class
+sitting one frame outside the window (or just past the place radius) made
+the query "unanswerable" while the memory's smooth kernels legitimately
+responded, counting correct behaviour as error (deflating our own AUROC).
+Now a class x time window is unanswerable only if no event of the class
+lies within window +/- 2*time_l (40 fr at the default scales), and a
+place-mismatch when(c, place) only if no event of c lies within
+radius + 2*pos_l (= 2.5 m) of the probe. ``--no-guard-band`` reproduces
+the old (noisy) labels exactly.
+
 Each query is labeled against the exact table (position correct = within
 1.0 m of the modal answer, time within 40 fr, class exact; any answer to an
 unanswerable query counts as an error). Confidence scores are the router's
@@ -62,10 +73,15 @@ TIME_OK_FR = 40.0  # time correct = within 40 frames
 
 def build_battery(ev, table, rng, min_class_events=3,
                   n_tpoint=5, n_twin=4, n_what=60,
-                  n_gapwin=2, n_outside=30, n_mismatch=25):
+                  n_gapwin=2, n_outside=30, n_mismatch=25,
+                  t_guard=0.0, place_guard=2.0):
     """Labeled query battery. Each item:
     {desc, decode, kind, kwargs, exact, answerable}
-    kind in {pos, time, class} decides the correctness rule."""
+    kind in {pos, time, class} decides the correctness rule.
+
+    t_guard / place_guard implement the FIX 3 guard band on the
+    unanswerable labels (see module docstring). t_guard=0, place_guard=2.0
+    reproduces the original (unguarded) battery exactly."""
     cls_arr = np.array(ev["class"])
     t_arr, x_arr, y_arr = ev["t"], ev["x"], ev["y"]
     t_max = float(t_arr.max())
@@ -124,7 +140,8 @@ def build_battery(ev, table, rng, min_class_events=3,
 
     # ---- unanswerable ----------------------------------------------------
     # (1) class x time window with ZERO events of that class in the window
-    #     (includes classes queried in windows they never appear)
+    #     +/- t_guard (guard band, FIX 3: without it an event 1 frame past
+    #     the window edge made a legitimately-answered query count as error)
     for c in classes:
         tc = t_arr[cls_arr == c]
         got = 0
@@ -133,7 +150,7 @@ def build_battery(ev, table, rng, min_class_events=3,
                 break
             a = float(rng.uniform(0.0, t_max - 80.0))
             w = (a, a + 80.0)
-            if np.any((tc >= w[0]) & (tc <= w[1])):
+            if np.any((tc >= w[0] - t_guard) & (tc <= w[1] + t_guard)):
                 continue
             add(f"where({c},t in {w[0]:.0f}:{w[1]:.0f}) [UNANS]", "where",
                 "pos", dict(what=c, when=w), None, answerable=False)
@@ -153,6 +170,7 @@ def build_battery(ev, table, rng, min_class_events=3,
         add(f"what(({p[0]:+.1f},{p[1]:+.1f})) [UNANS]", "what", "class",
             dict(where=p), None, answerable=False)
     # (3) when(class, place) at in-bounds places the class never appears
+    #     (place_guard = scoring radius + 2*pos_l under FIX 3)
     got = 0
     for _ in range(2000):
         if got >= n_mismatch:
@@ -160,7 +178,7 @@ def build_battery(ev, table, rng, min_class_events=3,
         c = classes[rng.randint(len(classes))]
         m = cls_arr == c
         p = (float(rng.uniform(*bx)), float(rng.uniform(*by)))
-        if np.any(np.hypot(x_arr[m] - p[0], y_arr[m] - p[1]) <= 2.0):
+        if np.any(np.hypot(x_arr[m] - p[0], y_arr[m] - p[1]) <= place_guard):
             continue
         add(f"when({c},@({p[0]:+.1f},{p[1]:+.1f})) [UNANS]", "when", "time",
             dict(what=c, where=p), None, answerable=False)
@@ -284,6 +302,11 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--min-class-events", type=int, default=3)
     ap.add_argument("--z-threshold", type=float, default=3.0)
+    ap.add_argument("--no-guard-band", action="store_true",
+                    help="reproduce the ORIGINAL unguarded unanswerable "
+                         "labels (pre-hardening; deflates AUROC — an event "
+                         "just outside the window/radius counts a legitimate "
+                         "answer as error)")
     args = ap.parse_args()
 
     t_start = time.time()
@@ -297,8 +320,19 @@ def main():
     router = QueryRouter(tr, z_threshold=args.z_threshold)
 
     rng = np.random.RandomState(args.seed)
+    if args.no_guard_band:
+        t_guard, place_guard = 0.0, 2.0  # original (pre-hardening) labels
+        print("GUARD BAND OFF (--no-guard-band): reproducing the ORIGINAL "
+              "noisy unanswerable labels")
+    else:
+        t_guard = 2.0 * float(tr.enc.time_l)          # window +/- 40 fr
+        place_guard = 1.0 + 2.0 * float(tr.enc.pos_l)  # radius + 1.5 = 2.5 m
+        print(f"guard band ON (FIX 3 default): unanswerable windows require "
+              f"no class event within +/-{t_guard:.0f} fr; place mismatches "
+              f"require none within {place_guard:.1f} m")
     battery = build_battery(ev, table, rng,
-                            min_class_events=args.min_class_events)
+                            min_class_events=args.min_class_events,
+                            t_guard=t_guard, place_guard=place_guard)
     n_ans = sum(1 for q in battery if q["answerable"] and q["exact"] is not None)
     n_un = len(battery) - n_ans
     print(f"battery: {len(battery)} queries ({n_ans} answerable, "

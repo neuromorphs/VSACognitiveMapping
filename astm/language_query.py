@@ -264,13 +264,16 @@ def main():
 
     results = {"grounded": [], "direct": []}
     ok_ground = 0
+    ground_hits = {}
     for text, intended in BATTERY:
         out = eval_one(text, intended)
         for mech in results:
             if mech in out:
                 results[mech].append((text, intended, out[mech][3]))
-        if "grounded" in out and out["grounded"][4][0][0] == intended:
-            ok_ground += 1
+        if "grounded" in out:
+            ground_hits[text] = out["grounded"][4][0][0] == intended
+            if ground_hits[text]:
+                ok_ground += 1
 
     print("\n===== SUMMARY =====")
     if results["grounded"]:
@@ -284,6 +287,25 @@ def main():
               f" <=1 m: {(errs <= 1.0).sum()}/{len(errs)}")
         worst = sorted(results["direct"], key=lambda r: -r[2])[:3]
         print("  hardest for direct:", "; ".join(f"'{t}'→{c} ({e:.1f} m)" for t, c, e in worst))
+
+    # paraphrase-only split: exclude the exact-name queries (text == class
+    # name — identity freebies for both mechanisms); the paraphrases are the
+    # actual zero-shot language claim.
+    n_exact = sum(1 for t, c in BATTERY if t == c)
+    para_texts = [t for t, c in BATTERY if t != c]
+    print(f"paraphrase-only split (n={len(para_texts)}; excludes {n_exact} "
+          f"exact-name queries):")
+    for mech in ("grounded", "direct"):
+        if not results[mech]:
+            continue
+        pe = np.array([e for t, c, e in results[mech] if t != c])
+        line = (f"  {mech:>8}: position err mean {pe.mean():.2f} m, "
+                f"median {np.median(pe):.2f} m, <=1 m: "
+                f"{(pe <= 1.0).sum()}/{len(pe)}")
+        if mech == "grounded":
+            ph = sum(1 for t in para_texts if ground_hits.get(t))
+            line += f" | top-1 text-grounding {ph}/{len(para_texts)}"
+        print(line)
 
     # figure: one worked example, both mechanisms
     import matplotlib
