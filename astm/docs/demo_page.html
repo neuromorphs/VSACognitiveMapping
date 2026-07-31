@@ -209,10 +209,10 @@ details.deep .body p{margin:0 0 .9em}
       <span class="kicker">ASTM &middot; a VSA cognitive map for Spot</span>
       <nav class="jump" aria-label="Sections">
         <a href="#replay">Replay</a>
-        <a href="#how">How it works</a>
         <a href="#lang">English</a>
         <a href="#time">Time</a>
         <a href="#merge">Merge</a>
+        <a href="#how">How it works</a>
         <a href="#limits">Limits</a>
       </nav>
       <button id="themeBtn" class="btn" type="button">Dark / light</button>
@@ -220,13 +220,18 @@ details.deep .body p{margin:0 0 .9em}
 
     <h1>The whole room, remembered in four vectors</h1>
     <p class="lede">
-      A Boston Dynamics Spot walked one lap of a classroom. Every object detection along the
-      way &mdash; <em>what</em> it was, <em>where</em> the robot was, <em>when</em> it happened &mdash; was
-      multiplied into four fixed-size 8192-dimensional complex vectors. That is the entire map:
-      no landmark list, no pose graph, no database of detections. Recall is arithmetic. You
-      divide out the parts of the question you know, and correlate what is left against a grid
-      to read off the part you do not. Every panel below is a real query against that memory,
-      answered in <b>3&ndash;15&nbsp;ms on a CPU</b>, exported here as static results.
+      A Boston Dynamics Spot walked one lap of a classroom. All 4,498 object detections along the
+      way &mdash; <em>what</em> each one was, <em>where</em> the robot was, <em>when</em> it happened &mdash;
+      were multiplied into four fixed-size 8192-dimensional complex vectors. There is no landmark
+      list, no pose graph and no database of detections: recall is arithmetic. You divide out the
+      parts of the question you know, and correlate what is left against a grid to read off the
+      part you do not. Every panel below is a real query, run offline on a laptop CPU in
+      <b>single-digit milliseconds</b> and exported here as static results.
+    </p>
+    <p class="lede" style="font-size:.95rem;color:var(--muted);margin-top:-6px">
+      <b>Start anywhere.</b> Three things worth trying: press <b>play</b> on the replay below;
+      click <b>&ldquo;cold storage for food&rdquo;</b> in the English panel; drag the <b>time slider</b>
+      and watch the memory abstain. The mechanism is explained after the demos, not before them.
     </p>
 
     <div class="card prose" style="max-width:78ch">
@@ -241,15 +246,21 @@ details.deep .body p{margin:0 0 .9em}
           so compare them to each other (and to the <code>z</code> score against the noise floor),
           never to 1.0. <code>z &lt; 3</code> means the memory is abstaining &mdash; saying &ldquo;nothing here&rdquo;
           rather than guessing.</li>
+        <li><b>There are two memories on this page, not one.</b> The replay and time panels query
+          four traces built from the <em>robot's own pose</em> stream. The English panel queries a
+          second memory of identical construction, built over <em>object positions</em> with
+          text-derived class atoms. Same algebra, different traces &mdash; so &ldquo;where&rdquo;
+          means the robot's vantage in one and the object's location in the other.</li>
         <li><b>Nothing loads from the network.</b> The images, fields and numbers are baked into this
-          one file, so it works offline or over a shared link.</li>
+          one file, so it works offline or over a shared link. It is a <em>static export</em>: the
+          queries were run ahead of time, and nothing is computed as you scrub.</li>
       </ul>
     </div>
 
     <div class="statgrid">
       <div class="stat"><b>8192-d</b><span>complex FHRR vectors; 4 traces hold the whole walk</span></div>
-      <div class="stat"><b>512 KB</b><span>fixed footprint on disk, whatever the room contains</span></div>
-      <div class="stat"><b>3&ndash;15 ms</b><span>per query, single CPU thread, no learned decoder</span></div>
+      <div class="stat"><b>512 KB</b><span>of traces &mdash; flat in the number of detections (but not the whole footprint: see limits)</span></div>
+      <div class="stat"><b>3&ndash;10 ms</b><span>measured per time-query on a laptop CPU; no learned decoder</span></div>
       <div class="stat"><b>0.15 m</b><span>median position recall over the replayed walk</span></div>
     </div>
   </div>
@@ -260,7 +271,7 @@ details.deep .body p{margin:0 0 .9em}
 <!-- ============ 2. REPLAY ============ -->
 <section id="replay">
   <div class="wrap">
-    <p class="eyebrow">1 &middot; Live replay</p>
+    <p class="eyebrow">1 &middot; The walk, replayed</p>
     <h2>Watch the memory recall the robot's position, frame by frame</h2>
     <p class="prose">
       Press play. On the left is what Spot saw, with the detector boxes that were folded into
@@ -303,6 +314,8 @@ details.deep .body p{margin:0 0 .9em}
         <button id="playBtn" class="btn wide" type="button" aria-pressed="false">&#9654; Play</button>
         <input id="stepSlider" type="range" min="0" max="0" value="0" step="1" aria-label="Replay step">
         <span class="num" id="stepLabel" style="min-width:11ch;font-size:.86rem;color:var(--muted)"></span>
+        <button id="worstBtn" class="btn" type="button"
+                title="Jump to the largest position error in the walk">Worst frame &#8594;</button>
       </div>
       <dl class="kv" id="replayKV"></dl>
       <p class="note" style="margin:10px 0 0">
@@ -314,10 +327,236 @@ details.deep .body p{margin:0 0 .9em}
   </div>
 </section>
 
+
+<!-- ============ 4. LANGUAGE ============ -->
+<section id="lang">
+  <div class="wrap">
+    <p class="eyebrow">2 &middot; Ask it in English</p>
+    <h2>A sentence you never taught it, used directly as the key</h2>
+    <p class="prose">
+      The map stores object <em>classes</em> from a detector &mdash; chair, tv, suitcase. It has never
+      seen the phrase &ldquo;cold storage for food&rdquo;. Here we take the raw sentence-embedding of the
+      phrase, whiten it, and hand it to the memory as the unbinding key, with no lookup table
+      and no retraining. Click a phrase.
+    </p>
+    <p class="note" style="margin:-6px 0 18px">
+      This panel queries a <b>second memory</b>, not the four traces from the replay above: same
+      algebra and same dimension, but built over <em>object</em> positions (from depth) with class
+      atoms derived from the class <em>names</em> rather than from random seeds. So &ldquo;where&rdquo;
+      here means where the object is, not where the robot stood.
+      <a href="#how-lang">The five-step pipeline is diagrammed below &darr;</a>
+    </p>
+
+    <div class="chips" id="langChips" role="group" aria-label="Phrases to ask"></div>
+
+    <div class="two">
+      <div class="card">
+        <canvas id="cvLang" class="cv-map" role="img"
+                aria-label="Similarity field over the room for the selected English phrase"></canvas>
+        <div class="legend">
+          <span><i style="background:var(--c-truth)"></i>true object location</span>
+          <span><i style="background:var(--c-peak)"></i>decoded peak</span>
+          <span><i style="background:#9aa4b2"></i>other objects in the room</span>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <h3 id="langQ" style="font-size:1.15rem">&nbsp;</h3>
+          <dl class="kv" id="langKV"></dl>
+          <h3 style="margin-top:16px">Closest stored class labels (text similarity)</h3>
+          <div class="bars" id="langBars"></div>
+          <p class="note" id="langNote" style="margin-top:12px"></p>
+        </div>
+      </div>
+    </div>
+
+    <details class="deep">
+      <summary>How the sentence actually gets in (and what that does <em>not</em> mean)</summary>
+      <div class="body">
+        <p>Five fixed steps, no lookup and no retraining.
+          <b>(1)</b> <code>all-MiniLM-L6-v2</code> embeds the phrase into 384 real dimensions.
+          <b>(2)</b> That embedding is whitened by a PCA fitted over the vocabulary &mdash; the 38
+          detected class names plus 203 further common object nouns, 241 rows in all &mdash; keeping up to 128
+          unit-variance components. <b>(3)</b> A single fixed Gaussian matrix
+          <code>W&nbsp;~&nbsp;N(0,&nbsp;1/d<sub>in</sub>)</code> of shape
+          <code>(d<sub>in</sub>,&nbsp;2D)</code> turns it into (I,&nbsp;Q) pairs. <b>(4)</b> Each pair is
+          normalised onto the unit circle and its magnitude discarded, leaving an ordinary
+          unit-modulus phasor of dimension 8192. <b>(5)</b> The memory is unbound by that phasor and
+          the residual correlated against the position grid.</p>
+        <p>The step that makes it work: <b>the memory's class atoms were built with the same
+          encoder, the same whitening and the same <code>W</code>, from the class names.</b> So a
+          novel phrase lands near the atoms of semantically similar class names, in the same phasor
+          space the map is written in.</p>
+        <p>What this is <em>not</em>: the language model never reads the map, and nothing is decoded
+          back into text. The sentence is projected into the map's own space and then it is just
+          algebra. Note that this cuts both ways &mdash; the projection has no notion of
+          <em>which</em> chair you meant, so on a class with many instances the answer is whichever
+          mode of the similarity field happens to be highest.
+          <a href="#how-lang">See the annotated pipeline &darr;</a></p>
+      </div>
+    </details>
+
+    <p class="cap">
+      <b>What you are looking at.</b> The heat map is the memory's answer to a question posed in
+      free-text English, with the sentence vector itself acting as the algebraic key &mdash; the phrases
+      were never stored, never enumerated, never trained on.
+      <b>Why it is interesting.</b> 9 of the 11 phrases land within 0.25&nbsp;m of the object we
+      scored against (median error 0.19&nbsp;m). <b>The two that miss, miss differently, and the
+      difference matters.</b> &ldquo;A computer display&rdquo; is 5.93&nbsp;m from the tv we scored
+      against but lands 0.10&nbsp;m from a <em>laptop</em> &mdash; a genuinely semantic miss, and
+      arguably the better answer. &ldquo;Something to sit on&rdquo; is 6.93&nbsp;m from the chair we
+      scored against but lands 0.14&nbsp;m from a <em>different chair</em>: the right class, the wrong
+      instance. That is not a language failure at all. <code>chair</code> has 23 instances scattered
+      round the room, the similarity field is multi-modal, and a single argmax has to pick one peak.
+      It is the failure mode any argmax over a multi-instance class will always have, and fixing it
+      needs instance identity in the memory &mdash; which is not built.
+      <a href="#how-lang">The five-step projection, diagrammed &darr;</a>
+    </p>
+  </div>
+</section>
+
+<!-- ============ 5. TIME ============ -->
+<section id="time">
+  <div class="wrap">
+    <p class="eyebrow">3 &middot; Ask it about time</p>
+    <h2>Where was it then, and when was it there</h2>
+    <p class="prose">
+      Time is bound in as a third factor, so the same four vectors answer questions in both
+      directions. Divide out the class and the timestamp to get a map of <em>where</em>; divide
+      out the class and a place to get a curve over <em>when</em>. The time key is a complex
+      exponential whose similarity kernel is a smooth sinc-like bump, and an entire <em>window</em>
+      of time integrates in closed form into a single key &mdash; so asking about a 28-second window
+      (a third of this 83-second walk) costs about what asking about a single instant costs:
+      9.8&ndash;10.2&nbsp;ms against 9.0&ndash;10.2&nbsp;ms.
+    </p>
+
+    <div class="chips" role="tablist" aria-label="Time views">
+      <button class="chip" id="tabA" role="tab" aria-selected="true"  aria-controls="panelA" type="button">Where was X at time t?</button>
+      <button class="chip" id="tabB" role="tab" aria-selected="false" aria-controls="panelB" type="button">When was X here?</button>
+    </div>
+
+    <div id="panelA" role="tabpanel" aria-labelledby="tabA">
+      <div class="two">
+        <div class="card">
+          <canvas id="cvTime" class="cv-map" role="img"
+                  aria-label="Similarity field for the selected class at the selected time"></canvas>
+          <div class="legend">
+            <span><i style="background:var(--c-truth)"></i>robot pose at t</span>
+            <span><i style="background:var(--c-class)"></i>nearest sighting of this class</span>
+            <span><i style="background:var(--c-peak)"></i>decoded peak</span>
+          </div>
+        </div>
+        <div>
+          <div class="card">
+            <div class="chips" id="timeClasses" role="group" aria-label="Class" style="margin-bottom:10px"></div>
+            <div class="ctrl" style="margin-top:0">
+              <input id="timeSlider" type="range" min="0" max="9" value="0" step="1" aria-label="Time point">
+              <span class="num" id="timeLabel" style="min-width:12ch;font-size:.86rem;color:var(--muted)"></span>
+            </div>
+            <p id="timeBadges" style="margin:12px 0 0"></p>
+            <dl class="kv" id="timeKV"></dl>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="panelB" role="tabpanel" aria-labelledby="tabB" hidden>
+      <div class="two" id="whenGrid"></div>
+    </div>
+
+    <h3 style="margin-top:30px">A time <em>range</em>, for the same price: &ldquo;where was the chair during&hellip;&rdquo;</h3>
+    <div class="three" id="winGrid"></div>
+
+    <h3 style="margin-top:30px">&ldquo;What moved between the first third of the walk and the last?&rdquo;</h3>
+    <div class="two">
+      <div class="card">
+        <h3>The answer: classes the memory is actually confident about</h3>
+        <table id="movedConf"><tbody></tbody></table>
+        <p class="note" id="movedConfNote" style="margin-top:8px"></p>
+      </div>
+      <div class="card">
+        <h3>The foil: top-5 by raw displacement, confidence ignored</h3>
+        <table id="movedAll"><tbody></tbody></table>
+        <p class="note" style="margin-top:8px">
+          Every one of these is at the noise floor &mdash; <code>z &lt; 3</code> in <em>both</em>
+          windows, the highest reaching only 2.70.
+          Rank a 38-class vocabulary by displacement without checking confidence and you are
+          ranking crosstalk. This is why the abstention flag exists.
+        </p>
+      </div>
+    </div>
+
+    <p class="cap">
+      <b>What you are looking at.</b> One fixed-size memory answering <em>where-given-when</em>
+      (top) and <em>when-given-where</em> (middle) and <em>what-changed-between-two-windows</em>
+      (bottom) &mdash; all by division and correlation, never by scanning a log.
+      <b>Why it is interesting.</b> A time range costs about what a time point costs, because the
+      window integrates in closed form into a single unbinding key. And the abstentions are visible
+      rather than hidden: <em>person</em> clears the confidence threshold at only 1 of 10 time
+      points. Seven of those nine abstentions are honest &mdash; no person was detected anywhere near
+      those instants. <b>Two are misses.</b> At t=275 and t=963 there were 35 and 16 person
+      detections within one time length-scale and the memory still said nothing. <code>person</code>
+      contributes 383 events against <code>chair</code>'s 2,369, and rare classes lose to crosstalk.
+      The abstention flag is well calibrated, not infallible.
+      <a href="#how-ops">Why crowding a memory blunts every answer &darr;</a>
+    </p>
+  </div>
+</section>
+
+<!-- ============ 6. MERGE ============ -->
+<section id="merge">
+  <div class="wrap">
+    <p class="eyebrow">4 &middot; Two memories, one sum</p>
+    <h2>Merging two maps is addition</h2>
+    <div class="two" style="align-items:start">
+      <figure>
+        <img id="mergeImg" alt="Three panels: the memory built from half A of the detections, the memory built from half B, and their sum, which matches the memory built over the union to 3.9e-15.">
+      </figure>
+      <div class="prose">
+        <p>
+          This walk's 4,498 detections are split alternately into two halves, and each half is built
+          into its own memory. Add the two together and you get, <em>exactly</em>, the memory you
+          would have built from the union &mdash; agreement to
+          <b>3.9&times;10<sup>&minus;15</sup></b>, i.e. floating-point noise. The merged memory is
+          the same size as either input: <b>k sessions still occupy 512&nbsp;KB</b>, tested to k=16.
+          Be clear about what this is: a clean test of the algebra's additivity, <em>not</em> two
+          robots covering different ground. Interleaving means both halves see the whole room.
+        </p>
+        <p>
+          If B's coordinate frame is offset by an unknown amount, one correlation sweep over
+          candidate offsets recovers it, and the offset is then divided out of B's memory before
+          adding. That is the whole procedure. The sweep here returns the true
+          (+1.40,&nbsp;&minus;0.90)&nbsp;m offset exactly &mdash; but that is partly the luck of the
+          grid, which steps in 0.1&nbsp;m and happens to contain the answer. Read it as
+          <em>accurate to the sweep resolution</em>, not as accurate to zero.
+        </p>
+        <p>
+          <b>No ICP, no landmark matching, no data association</b> &mdash; correspondence is implicit
+          in the algebra, because identical content lands on identical vectors and simply sums.
+          Two preconditions make that work, and both are real constraints. The two memories must
+          share the same random bases and the same class codebook; and both must weight by
+          confidence alone, because class-frequency weightings depend on global counts and are
+          <em>not</em> additive. The English-query memory on this page uses one of those weightings,
+          and so is not mergeable as built. We have also not benchmarked scene-graph or kNN fusion,
+          so read this as an architectural contrast rather than a measured win.
+        </p>
+      </div>
+    </div>
+    <p class="cap">
+      <b>What you are looking at.</b> Two independently built memories and their sum, compared
+      against the ground-truth joint memory.
+      <b>Why it is interesting.</b> Map fusion is one vector addition plus one correlation sweep,
+      at constant memory cost, with no correspondence problem to solve first &mdash; subject to the
+      two preconditions above.
+      <a href="#how-pos">Why a coordinate offset divides out cleanly &darr;</a>
+    </p>
+  </div>
+</section>
+
 <!-- ============ 3. HOW IT ACTUALLY WORKS ============ -->
 <section id="how">
   <div class="wrap">
-    <p class="eyebrow">2 &middot; Under the hood</p>
+    <p class="eyebrow">5 &middot; Under the hood</p>
     <h2>How it actually works</h2>
     <p class="prose">
       You have just watched it work. Here is the whole mechanism, with no metaphors: a place, a
@@ -330,9 +569,10 @@ details.deep .body p{margin:0 0 .9em}
       <b>Read this first.</b> The widgets in this section build their vectors at
       <b>D&nbsp;=&nbsp;1024</b> dimensions with their own random draw, so that the kernel shape and the
       interference between stored items are big enough to see on a screen. The exported memory
-      everywhere else on this page is <b>D&nbsp;=&nbsp;8192</b> with a different draw. Same formulas,
-      same code path &mdash; only the dimensionality and the seed differ, and every number printed
-      below is computed in your browser as you read it, not baked in.
+      everywhere else on this page is <b>D&nbsp;=&nbsp;8192</b> with a different draw. The formulas
+      are the same, but these widgets are an independent JavaScript re-implementation checked against
+      the Python &mdash; not the production code path itself. Every number printed below is computed
+      in your browser as you read it, rather than baked in.
     </p>
 
     <!-- ---------- W1: POSITION ---------- -->
@@ -388,7 +628,7 @@ S(x, y)[m] = exp( i * ( phi_x[m] * x/l  +  phi_y[m] * y/l ) )</div>
       <div class="pane" style="margin-top:18px">
         <h3>A straight-line slice through that blob</h3>
         <canvas id="cvW1Slice" class="cv-wide" role="img"
-                aria-label="Line chart of similarity against displacement in metres, showing a sinc-like bump centred on zero whose half width is the 0.75 metre length scale, for slices taken along x and along y."></canvas>
+                aria-label="Line chart of similarity against displacement in metres, showing a sinc-like bump centred on zero whose half-height width is about 0.23 metres, set by the 0.75 metre length scale, for slices taken along x and along y."></canvas>
         <div class="legend">
           <span><i style="background:var(--c-exact)"></i>slice along x</span>
           <span><i style="background:var(--c-class)"></i>slice along y</span>
@@ -401,9 +641,12 @@ S(x, y)[m] = exp( i * ( phi_x[m] * x/l  +  phi_y[m] * y/l ) )</div>
     <p class="cap">
       <b>What to notice.</b> The blob follows you, but its <em>shape</em> never changes &mdash; the
       similarity between two places depends only on the displacement between them, never on where
-      in the room they are. That translation-invariance is the homomorphism, drawn; and the width of
-      the bump is the length scale <code>l&nbsp;=&nbsp;0.75&nbsp;m</code>, which is the resolution dial for
-      the whole map.
+      in the room they are. That translation-invariance is the homomorphism, drawn. The bump's width
+      is <em>set by</em> the length scale <code>l&nbsp;=&nbsp;0.75&nbsp;m</code> &mdash; precisely, it
+      falls to half height at <code>0.30&nbsp;l</code>&nbsp;&asymp;&nbsp;0.23&nbsp;m and first crosses
+      zero at <code>l/2</code>&nbsp;=&nbsp;0.375&nbsp;m, so the marker drawn at <code>l</code> itself
+      sits on the <em>second</em> null, not on the edge of the bump. <code>l</code> is the resolution
+      dial for the whole map.
     </p>
 
     <details class="deep">
@@ -418,7 +661,7 @@ S(x, y)[m] = exp( i * ( phi_x[m] * x/l  +  phi_y[m] * y/l ) )</div>
           <code>S(target)&nbsp;&#8856;&nbsp;S(anchor)&nbsp;=&nbsp;S(target&nbsp;&minus;&nbsp;anchor)</code>. A
           relative displacement is not a special case that had to be built &mdash; it falls out of the
           encoding.</p>
-        <p><b>(b) The similarity kernel is a bump of width <code>l</code>.</b>
+        <p><b>(b) The similarity kernel is a bump whose scale is set by <code>l</code>.</b>
           <code>sim(S(0),&nbsp;S(d))&nbsp;=&nbsp;(1/D)&nbsp;&sum;<sub>m</sub>&nbsp;cos(phi<sub>m</sub>&nbsp;&middot;&nbsp;d/l)</code>.
           With phases drawn uniformly this is a sinc-like bump: nearby places are similar, distant
           places are near-orthogonal. That kernel is the reason every heat map on this page is a
@@ -502,9 +745,11 @@ S(x, y)[m] = exp( i * ( phi_x[m] * x/l  +  phi_y[m] * y/l ) )</div>
           such ceiling and gets a much cleaner single bump. Exact periodicity is bought with
           angular sharpness, and the polar panel in the replay is that trade-off on screen.</p>
         <p><b>On ring attractors, said carefully.</b> Ring and continuous attractor networks
-          <em>are</em> the standard neuromorphic way to hold a heading, and they are used in the
-          GC-VSA line of work (Krausse, Neftci, Sommer &amp; Renner, NICE 2025), which combines
-          continuous attractor networks with VSA. The representation here is from the same family;
+          <em>are</em> the standard neuromorphic way to hold a heading. Closely related is the GC-VSA
+          work of Krausse, Neftci, Sommer &amp; Renner (NICE 2025, <code>arXiv:2503.08608</code>),
+          whose algebra is <em>inspired by</em> continuous attractor networks and VSAs &mdash; though
+          it models grid-cell <em>position</em> coding rather than heading.
+          The representation here is from the same family;
           the difference is that this code computes the vector directly rather than letting a
           network settle into it, and a continuous attractor network is the natural hardware
           implementation route for exactly this algebra. But nothing on this page runs one, and no
@@ -639,199 +884,6 @@ unbind(a, b)[m] = a[m] / b[m]         phases subtract   (the inverse of bind)</d
   </div>
 </section>
 
-<!-- ============ 4. LANGUAGE ============ -->
-<section id="lang">
-  <div class="wrap">
-    <p class="eyebrow">3 &middot; Ask it in English</p>
-    <h2>A sentence you never taught it, used directly as the key</h2>
-    <p class="prose">
-      The map stores object <em>classes</em> from a detector &mdash; chair, tv, suitcase. It has never
-      seen the phrase &ldquo;cold storage for food&rdquo;. Here we take the raw sentence-embedding of the
-      phrase, whiten it, and hand it to the memory as the unbinding key, with no lookup table
-      and no retraining. Click a phrase.
-    </p>
-
-    <div class="chips" id="langChips" role="group" aria-label="Phrases to ask"></div>
-
-    <div class="two">
-      <div class="card">
-        <canvas id="cvLang" class="cv-map" role="img"
-                aria-label="Similarity field over the room for the selected English phrase"></canvas>
-        <div class="legend">
-          <span><i style="background:var(--c-truth)"></i>true object location</span>
-          <span><i style="background:var(--c-peak)"></i>decoded peak</span>
-          <span><i style="background:#9aa4b2"></i>other objects in the room</span>
-        </div>
-      </div>
-      <div>
-        <div class="card">
-          <h3 id="langQ" style="font-size:1.15rem">&nbsp;</h3>
-          <dl class="kv" id="langKV"></dl>
-          <h3 style="margin-top:16px">Closest stored class labels (text similarity)</h3>
-          <div class="bars" id="langBars"></div>
-          <p class="note" id="langNote" style="margin-top:12px"></p>
-        </div>
-      </div>
-    </div>
-
-    <details class="deep">
-      <summary>How the sentence actually gets in (and what that does <em>not</em> mean)</summary>
-      <div class="body">
-        <p>Five fixed steps, no lookup and no retraining.
-          <b>(1)</b> <code>all-MiniLM-L6-v2</code> embeds the phrase into 384 real dimensions.
-          <b>(2)</b> That embedding is whitened by a PCA fitted over the vocabulary &mdash; the 38
-          detected class names plus about 180 common object nouns &mdash; keeping up to 128
-          unit-variance components. <b>(3)</b> A single fixed Gaussian matrix
-          <code>W&nbsp;~&nbsp;N(0,&nbsp;1/d<sub>in</sub>)</code> of shape
-          <code>(d<sub>in</sub>,&nbsp;2D)</code> turns it into (I,&nbsp;Q) pairs. <b>(4)</b> Each pair is
-          normalised onto the unit circle and its magnitude discarded, leaving an ordinary
-          unit-modulus phasor of dimension 8192. <b>(5)</b> The memory is unbound by that phasor and
-          the residual correlated against the position grid.</p>
-        <p>The step that makes it work: <b>the memory's class atoms were built with the same
-          encoder, the same whitening and the same <code>W</code>, from the class names.</b> So a
-          novel phrase lands near the atoms of semantically similar class names, in the same phasor
-          space the map is written in.</p>
-        <p>What this is <em>not</em>: the language model never reads the map, and nothing is decoded
-          back into text. The sentence is projected into the map's own space and then it is just
-          algebra &mdash; which is also why the failures on this page are semantic (the phrase genuinely
-          matched a different object) rather than mechanical.
-          <a href="#how-lang">See the annotated pipeline &uarr;</a></p>
-      </div>
-    </details>
-
-    <p class="cap">
-      <b>What you are looking at.</b> The heat map is the memory's answer to a question posed in
-      free-text English, with the sentence vector itself acting as the algebraic key &mdash; the phrases
-      were never stored, never enumerated, never trained on.
-      <b>Why it is interesting.</b> 9 of the 11 phrases land within 0.25&nbsp;m of the right object
-      (median error 0.19&nbsp;m). The two that miss &mdash; &ldquo;something to sit on&rdquo; &rarr; the couch,
-      &ldquo;a computer display&rdquo; &rarr; the laptop &mdash; miss <em>semantically</em>: they land on a
-      real, plausible object of the same kind, which is the failure mode you want and the reason
-      the grounded top-3 list is shown next to every answer.
-    </p>
-  </div>
-</section>
-
-<!-- ============ 5. TIME ============ -->
-<section id="time">
-  <div class="wrap">
-    <p class="eyebrow">4 &middot; Ask it about time</p>
-    <h2>Where was it then, and when was it there</h2>
-    <p class="prose">
-      Time is bound in as a third factor, so the same four vectors answer questions in both
-      directions. Divide out the class and the timestamp to get a map of <em>where</em>; divide
-      out the class and a place to get a curve over <em>when</em>. The time key is a smooth
-      exponential kernel, which is why asking about a five-minute <em>window</em> costs exactly what
-      asking about a single instant costs &mdash; the window integrates in closed form into one key.
-    </p>
-
-    <div class="chips" role="tablist" aria-label="Time views">
-      <button class="chip" id="tabA" role="tab" aria-selected="true"  aria-controls="panelA" type="button">Where was X at time t?</button>
-      <button class="chip" id="tabB" role="tab" aria-selected="false" aria-controls="panelB" type="button">When was X here?</button>
-    </div>
-
-    <div id="panelA" role="tabpanel" aria-labelledby="tabA">
-      <div class="two">
-        <div class="card">
-          <canvas id="cvTime" class="cv-map" role="img"
-                  aria-label="Similarity field for the selected class at the selected time"></canvas>
-          <div class="legend">
-            <span><i style="background:var(--c-truth)"></i>robot pose at t</span>
-            <span><i style="background:var(--c-class)"></i>nearest sighting of this class</span>
-            <span><i style="background:var(--c-peak)"></i>decoded peak</span>
-          </div>
-        </div>
-        <div>
-          <div class="card">
-            <div class="chips" id="timeClasses" role="group" aria-label="Class" style="margin-bottom:10px"></div>
-            <div class="ctrl" style="margin-top:0">
-              <input id="timeSlider" type="range" min="0" max="9" value="0" step="1" aria-label="Time point">
-              <span class="num" id="timeLabel" style="min-width:12ch;font-size:.86rem;color:var(--muted)"></span>
-            </div>
-            <p id="timeBadges" style="margin:12px 0 0"></p>
-            <dl class="kv" id="timeKV"></dl>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div id="panelB" role="tabpanel" aria-labelledby="tabB" hidden>
-      <div class="two" id="whenGrid"></div>
-    </div>
-
-    <h3 style="margin-top:30px">A time <em>range</em>, for the same price: &ldquo;where was the chair during&hellip;&rdquo;</h3>
-    <div class="three" id="winGrid"></div>
-
-    <h3 style="margin-top:30px">&ldquo;What moved between the first third of the walk and the last?&rdquo;</h3>
-    <div class="two">
-      <div class="card">
-        <h3>The answer: classes the memory is actually confident about</h3>
-        <table id="movedConf"><tbody></tbody></table>
-        <p class="note" id="movedConfNote" style="margin-top:8px"></p>
-      </div>
-      <div class="card">
-        <h3>The foil: top-5 by raw displacement, confidence ignored</h3>
-        <table id="movedAll"><tbody></tbody></table>
-        <p class="note" style="margin-top:8px">
-          Every one of these is at the noise floor (<code>z &lt; 3</code> in at least one window).
-          Rank a 38-class vocabulary by displacement without checking confidence and you are
-          ranking crosstalk. This is why the abstention flag exists.
-        </p>
-      </div>
-    </div>
-
-    <p class="cap">
-      <b>What you are looking at.</b> One fixed-size memory answering <em>where-given-when</em>
-      (top) and <em>when-given-where</em> (middle) and <em>what-changed-between-two-windows</em>
-      (bottom) &mdash; all by division and correlation, never by scanning a log.
-      <b>Why it is interesting.</b> A time range costs the same as a time point, because the
-      exponential time kernel integrates in closed form into a single unbinding key. And the
-      honest cases are visible: <em>person</em> is confident at only 1 of 10 time points, because a
-      person genuinely was not near the robot most of the walk &mdash; the memory says
-      &ldquo;nothing here&rdquo; rather than inventing a location.
-    </p>
-  </div>
-</section>
-
-<!-- ============ 6. MERGE ============ -->
-<section id="merge">
-  <div class="wrap">
-    <p class="eyebrow">5 &middot; Two robots, one memory</p>
-    <h2>Merging two maps is addition</h2>
-    <div class="two" style="align-items:start">
-      <figure>
-        <img id="mergeImg" alt="Three panels: robot A's memory, robot B's memory, and their sum, which matches the memory built over the union of both walks to 3.9e-15.">
-      </figure>
-      <div class="prose">
-        <p>
-          Robot A walks half the room, robot B walks the other half. Add their two memory vectors
-          together and you get, <em>exactly</em>, the memory you would have built from the union of both
-          walks &mdash; agreement to <b>3.9&times;10<sup>&minus;15</sup></b>, i.e. floating-point noise. The merged
-          memory is the same size as either input: <b>k sessions still occupy 512&nbsp;KB</b>.
-        </p>
-        <p>
-          If B's coordinate frame is offset by an unknown amount, one correlation sweep over
-          candidate offsets recovers it &mdash; here to <b>0.000&nbsp;m</b> &mdash; and the offset is then
-          divided out of B's memory before adding. That is the whole procedure.
-        </p>
-        <p>
-          <b>No ICP. No landmark matching. No data association.</b> Say it plainly: this is the
-          operation competing map representations cannot do cheaply, because they must first
-          solve object correspondence &mdash; decide that <em>your</em> chair #7 is <em>my</em> chair #3 &mdash;
-          before anything can be fused. Here correspondence is implicit in the algebra: identical
-          content lands on identical vectors and simply sums.
-        </p>
-      </div>
-    </div>
-    <p class="cap">
-      <b>What you are looking at.</b> Two independently built memories and their sum, compared
-      against the ground-truth joint memory.
-      <b>Why it is interesting.</b> Map fusion is one vector addition plus one correlation sweep,
-      at constant memory cost, with no correspondence problem to solve first.
-    </p>
-  </div>
-</section>
-
 <!-- ============ 7. LIMITS ============ -->
 <section id="limits">
   <div class="wrap">
@@ -839,27 +891,58 @@ unbind(a, b)[m] = a[m] / b[m]         phases subtract   (the inverse of bind)</d
     <h2>What this page does not show</h2>
     <ul class="limits">
       <li><b>One room, one walk.</b><span> Every number here comes from a single classroom sequence.
-        Nothing on this page demonstrates generalisation across environments.</span></li>
-      <li><b>Ground truth is partly derived from the same detector and the same poses that built the memory.</b>
-        <span> The &ldquo;true&rdquo; object positions come from the detector's own class map, and the &ldquo;true&rdquo;
-        robot positions come from the same pose stream that was encoded. This measures faithful
-        recall of what was stored, not sensing accuracy.</span></li>
+        A second environment was attempted and abandoned: on <code>school_run1</code> the LIO-SAM
+        odometry diverged (209 pose jumps over 5&nbsp;m), giving a 118&nbsp;m position error that
+        measures the odometry rather than the memory. Nothing on this page demonstrates
+        generalisation across environments.</span></li>
+      <li><b>Nothing is held out.</b><span> Every replayed step and every time point queries frames
+        that are <em>in</em> the stored set. This measures faithful recall of what was written, not
+        prediction, not generalisation, and not robustness to anything unseen.</span></li>
+      <li><b>The ground truth is estimator-matched, not independent.</b>
+        <span> &ldquo;True&rdquo; object positions come from the detector's own class map and
+        &ldquo;true&rdquo; robot positions from the same pose stream that was encoded &mdash; and the
+        kernel-density estimator that produces them uses <em>the encoder's own length scales</em>
+        (0.75&nbsp;m in space, 20 frames in time). A de-circularising bandwidth sweep was applied to
+        one benchmark only, not to the numbers on this page.</span></li>
       <li><b>The deployed footprint is dominated by the decoder grids, not the traces.</b>
-        <span> The four traces are 512&nbsp;KB. The grid codebooks used to decode them are
-        <b>118&nbsp;MB at D=4096</b>. Quoting &ldquo;the map is half a megabyte&rdquo; without that caveat is
-        misleading &mdash; the compact part is the memory, not the reader.</span></li>
-      <li><b>Whitening is a constant factor, not a scaling law.</b><span> Whitening the keys buys a
-        roughly <b>22&times;</b> reduction in crosstalk. It does not change how crosstalk grows with the
-        number of stored items; it moves the curve down, it does not bend it.</span></li>
+        <span> The four traces are 512&nbsp;KB at D=8192. For the exact configuration shown here the
+        decoder grids are <b>414&nbsp;MB</b> and the total map state is <b>420&nbsp;MB</b>. A coarser
+        D=4096 configuration totals 118&nbsp;MB, with 256&nbsp;KB of traces. &ldquo;The map is half a
+        megabyte&rdquo; is true of the memory and false of the machinery you need to read it.</span></li>
+      <li><b>The speed is a property of the decoder, and the storage economics do not yet favour this.</b>
+        <span> Decode is <b>91%</b> of query time (0.32&nbsp;ms encode, 0.05&nbsp;ms unbind,
+        4.89&nbsp;ms decode at D=8192) &mdash; the &ldquo;one unbind and correlate&rdquo; framing hides
+        that the correlate is nearly all of it. On bytes, an exact event table overtakes the traces at
+        about 3.3k events, already passed at the 4,498 demonstrated here; an <em>indexed</em> table
+        answers in ~1.8&nbsp;&micro;s and is never beaten on latency. The honest case for this
+        representation is compositional query, not storage economy &mdash; and testing that properly
+        against a vector-database baseline is the next milestone, not a settled result.</span></li>
+      <li><b>Whitening is a constant factor, not a scaling law.</b><span> Whitening the keys buys
+        roughly <b>22&times;</b> on the crosstalk-growth metric (4.6&times; on a recall-relative one).
+        It does not change how crosstalk grows with load: measured slopes are +0.97 raw against +0.86
+        whitened. It moves the curve down; it does not bend it. Every number on this page also uses
+        whitening statistics fitted <em>offline</em> over the whole walk &mdash; a causal, online
+        version is about 10&times; worse (0.86&nbsp;m against 0.09&nbsp;m whole-walk L1).</span></li>
+      <li><b>A single argmax cannot separate instances of a class.</b><span> <code>chair</code> has
+        23 instances in this room, <code>tv</code> 10, <code>person</code> 10. The similarity field is
+        multi-modal and the readout takes one peak, so &ldquo;where is the chair&rdquo; has no
+        well-posed answer. This is the cause of the language miss above, and no instance identity is
+        stored anywhere in the memory.</span></li>
       <li><b>Relational predicates are not implemented.</b><span> &ldquo;The chair <em>next to</em> the
         desk&rdquo;, &ldquo;the bag <em>under</em> the table&rdquo; &mdash; none of that exists here. The algebra
         supports class, place and time, and that is all that has been built.</span></li>
+      <li><b>The core algebra is not ours.</b><span> <code>vsa.py</code> &mdash; the phasor type,
+        bind, bundle, unbind and the random projection &mdash; is ported essentially verbatim from
+        <code>neuromorphs/VSACognitiveMapping</code>. What is added here is the multi-trace
+        spatio-temporal layer, the calibration and abstention machinery, the language projection and
+        the evaluation.</span></li>
     </ul>
     <figure style="margin-top:22px;max-width:900px">
       <img id="xtalkImg" alt="Crosstalk versus number of stored items, with and without whitening: two parallel curves, whitening shifting the curve down by a constant factor.">
       <figcaption class="note" style="margin-top:8px">
-        Crosstalk against load. Whitening (lower curve) shifts the curve down by a constant
-        factor; both curves have the same slope. That is the limit stated above, drawn.
+        Crosstalk against load. Whitening (lower curve) shifts the curve down by a constant factor;
+        the two curves have nearly the same slope &mdash; measured +0.97 raw against +0.86 whitened.
+        That is the limit stated above, drawn.
       </figcaption>
     </figure>
   </div>
@@ -872,16 +955,23 @@ unbind(a, b)[m] = a[m] / b[m]         phases subtract   (the inverse of bind)</d
     <h3>Running it yourself</h3>
     <p>
       Code: <code>github.com/neuromorphs/VSACognitiveMapping</code>, branch <code>astm</code>.
-      The pieces behind this page are <code>vsa_cognitive_mapping/astm_traces.py</code>
-      (<code>TraceSet</code>, <code>QueryRouter.query(decode, what=, where=, when=)</code>) and
-      <code>vsa_cognitive_mapping/language_query.py</code> (<code>LanguageMap</code>), running
-      against <code>outputs/classroom/astm_traces.pt</code>.
+      The replay and time panels run <code>vsa_cognitive_mapping/astm_traces.py</code>
+      (<code>TraceSet</code>, <code>QueryRouter.query(decode, what=, where=, when=)</code>) against
+      <code>outputs/classroom/astm_traces.pt</code>. The English panel runs
+      <code>vsa_cognitive_mapping/language_query.py</code> (<code>LanguageMap</code>), which builds
+      its <em>own</em> memory from <code>outputs/classroom/events_object.csv</code> rather than
+      loading those traces. The merge result comes from
+      <code>vsa_cognitive_mapping/memory_merge.py</code>, and the crosstalk figure from
+      <code>vsa_cognitive_mapping/crosstalk_scaling.py</code>.
     </p>
     <p class="note">
-      This page is a <b>static export of live results</b>: every field, peak, similarity, z-score
-      and latency was produced by running the real query code on the real classroom data, then
-      quantised to 8-bit and inlined here. Nothing is simulated, and nothing is fetched at view
-      time &mdash; the page makes no network requests of any kind.
+      This page is a <b>static export</b>: every field, peak, similarity, z-score and latency was
+      produced by running the query code on the classroom data, then quantised to 8-bit and inlined
+      here. Nothing is simulated, and nothing is fetched at view time &mdash; the page makes no
+      network requests of any kind. Two caveats for anyone trying to reproduce it: the widgets in
+      &ldquo;Under the hood&rdquo; are a JavaScript re-implementation that recomputes in your
+      browser, and the export script that generated this file is not yet committed to the branch,
+      so the page is currently reproducible only from the underlying modules and data.
     </p>
   </div>
 </footer>
@@ -1360,8 +1450,37 @@ var XTALK_PNG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABxwAAALYCAYAAABG0Ie
     renderReplay();
     requestAnimationFrame(tick);
   }
+  /* --- replay error statistics, computed from the data rather than hardcoded --- */
+  var RSTAT = (function () {
+    var errs = [], i, worst = 0;
+    for (i = 0; i < N; i++) { errs.push(STEPS[i].err_m); if (STEPS[i].err_m > STEPS[worst].err_m) worst = i; }
+    var under = 0, kept = [], blown = [];
+    for (i = 0; i < errs.length; i++) {
+      if (errs[i] < 0.5) under++;
+      (errs[i] > 1 ? blown : kept).push(errs[i]);
+    }
+    var sum = 0; for (i = 0; i < kept.length; i++) sum += kept[i];
+    blown.sort(function (a, b) { return a - b; });
+    /* how many detections were available to unbind, on the failures vs the rest */
+    var dB = 0, dK = 0, nB = 0, nK = 0, dBmin = 1e9, dBmax = 0;
+    for (i = 0; i < N; i++) {
+      var nd = STEPS[i].dets.length;
+      if (STEPS[i].err_m > 1) {
+        dB += nd; nB++; if (nd < dBmin) dBmin = nd; if (nd > dBmax) dBmax = nd;
+      } else { dK += nd; nK++; }
+    }
+    return {
+      worst: worst, under: under, nBlown: blown.length,
+      blownLo: blown.length ? blown[0] : 0, blownHi: blown.length ? blown[blown.length - 1] : 0,
+      meanKept: kept.length ? sum / kept.length : 0,
+      detBlownMean: nB ? dB / nB : 0, detKeptMean: nK ? dK / nK : 0,
+      detBlownMin: nB ? dBmin : 0, detBlownMax: nB ? dBmax : 0
+    };
+  })();
+
   playBtn.addEventListener('click', function () { setPlaying(!P.playing); });
   slider.addEventListener('input', function () { setStep(parseInt(slider.value, 10), true); });
+  $('#worstBtn').addEventListener('click', function () { setStep(RSTAT.worst, true); });
   document.addEventListener('keydown', function (e) {
     var t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT'
@@ -1379,9 +1498,17 @@ var XTALK_PNG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABxwAAALYCAYAAABG0Ie
     + '<b>Why it is interesting.</b> Measured recall over these ' + N + ' steps: median '
     + '<b>' + fmt(RE.pos_err_m.median, 3) + ' m</b>, mean ' + fmt(RE.pos_err_m.mean, 3) + ' m, '
     + '90th percentile ' + fmt(RE.pos_err_m.p90, 3) + ' m, worst ' + fmt(RE.pos_err_m.max, 2) + ' m '
-    + '(the mean is dragged up by one bad step; 65 of 70 are under 0.5 m). '
+    + '(' + RSTAT.under + ' of ' + N + ' are under 0.5 m; ' + RSTAT.nBlown + ' steps blow out to '
+    + fmt(RSTAT.blownLo, 1) + '&ndash;' + fmt(RSTAT.blownHi, 1) + ' m and carry most of the mean '
+    + '&mdash; without them it is ' + fmt(RSTAT.meanKept, 2) + ' m). Press <b>Worst frame</b> to see '
+    + 'the failure directly: the memory is confident and wrong, which is the case worth arguing about. '
+    + 'All ' + RSTAT.nBlown + ' failures land on frames carrying only ' + RSTAT.detBlownMin + '&ndash;'
+    + RSTAT.detBlownMax + ' detections to unbind (mean ' + fmt(RSTAT.detBlownMean, 1) + ', against '
+    + fmt(RSTAT.detKeptMean, 1) + ' elsewhere): too few cues and the residual is under-constrained. '
+    + 'That is the pattern, not a law &mdash; some single-detection frames still resolve correctly. '
     + 'There is no filter, no motion model and no temporal smoothing between frames &mdash; each frame '
-    + 'is answered independently, from memory alone.';
+    + 'is answered independently, from memory alone. '
+    + '<a href="#how">Why the answer is a blob rather than a point &darr;</a>';
 
   setStep(0, false);
   if (!REDUCED) setPlaying(true);
@@ -1880,12 +2007,12 @@ var XTALK_PNG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABxwAAALYCAYAAABG0Ie
       link: q.truth ? [q.truth[0], q.truth[1], q.peak[0], q.peak[1]] : null
     });
     $('#langQ').textContent = '“' + q.q + '”';
-    var ok = q.err_m != null && q.err_m <= 0.5;
+    var ok = q.err_m != null && q.err_m <= 0.25;
     kv($('#langKV'), [
       ['decoded peak', fmt(q.peak[0], 2) + ', ' + fmt(q.peak[1], 2) + ' m'],
       ['true object', q.truth ? (fmt(q.truth[0], 2) + ', ' + fmt(q.truth[1], 2) + ' m') : '–'],
       ['error', '<b>' + (q.err_m == null ? '–' : fmt(q.err_m, 2) + ' m') + '</b> ' +
-        badge(ok ? 'on target' : 'semantic near-miss', ok ? 'ok' : 'no')],
+        badge(ok ? 'on target' : 'missed the scored object', ok ? 'ok' : 'no')],
       ['peak similarity', q.sim.toExponential(2) + ' <span class="note">(&divide; ' + LANG.hd + ' dims)</span>']
     ]);
     var top = q.grounded_top3 || [];
@@ -2077,7 +2204,8 @@ var XTALK_PNG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABxwAAALYCAYAAABG0Ie
     fmt(WM.z_threshold, 0) + ' in both windows (A = frames ' + Math.round(WM.win_a[0]) + '–' +
     Math.round(WM.win_a[1]) + ', B = ' + Math.round(WM.win_b[0]) + '–' + Math.round(WM.win_b[1]) +
     '), and both moved ' + fmt(WM.rows_confident[0].moved_m, 2) +
-    ' m — one grid cell. The correct answer is <b>nothing moved</b>, which is also the truth.';
+    ' m — one decode cell diagonally, the grid stepping about 0.14 m. The correct answer is ' +
+    '<b>nothing moved</b>, which is also the truth.';
 
   /* =====================================================================
      THEME TOGGLE
