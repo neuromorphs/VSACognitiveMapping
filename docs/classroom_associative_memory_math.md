@@ -32,16 +32,28 @@ All code below lives in `scripts/classroom/` unless noted otherwise.
 
 ## 1. Detect & embed (`detect_and_embed_classroom.py`)
 
-Pure computer vision, no VSA yet. YOLOv8n runs twice per frame (once for
-detection boxes, once with `embed=` to short-circuit to the penultimate-layer
-feature vector) over every D455 RGB frame:
+Pure computer vision, no VSA yet. `--embedding-model` selects the content
+source: `yolo` (default) runs YOLOv8n twice per frame (once for detection
+boxes, once with `embed=` to short-circuit to the penultimate-layer feature
+vector); `dino` instead runs a frozen DINOv2 backbone (`--dino-model`,
+default `dinov2_vits14` — the same `torch.hub` loading convention
+`src/vsa_cognitive_mapping/encoder.py` uses for the JEPA pipeline) to get its
+CLS embedding. DINOv2 has no detection head, so object detection is skipped
+by default when `--embedding-model dino` (controlled by `--detect
+auto|on|off`).
 
 - `detections.csv` — long format, one row per detected box (`frame_idx,
-  timestamp_ns, class_id, class_name, confidence, x1, y1, x2, y2`).
-- `embeddings.pt` — `{"frame_idx": LongTensor[N], "timestamp_ns":
-  LongTensor[N], "embedding": FloatTensor[N, 256]}`, one 256-dim feature
-  vector per frame. This is the raw content every later stage projects into
-  phasor space.
+  timestamp_ns, class_id, class_name, confidence, x1, y1, x2, y2`). Produced
+  by YOLO only, shared/backend-independent (same filename regardless of
+  `--embedding-model`) — simply absent if detection didn't run.
+- `embeddings.pt` (or `embeddings_dino.pt` when `--embedding-model dino`) —
+  `{"frame_idx": LongTensor[N], "timestamp_ns": LongTensor[N], "embedding":
+  FloatTensor[N, D]}`, one D-dim feature vector per frame (D=256 for
+  yolov8n, D=384 for the default dinov2_vits14). This is the raw content
+  every later stage projects into phasor space.
+
+Detection and embedding are independently cacheable — each is (re)computed
+only if its own output is missing or `--force` is passed.
 
 **Run:**
 
@@ -49,6 +61,10 @@ feature vector) over every D455 RGB frame:
 python scripts/classroom/detect_and_embed_classroom.py \
   --out-dir outputs/classroom_detections
 # add --visualize to also render observations.mp4 (RGB + boxes + odometry + embedding self-correlation, side by side)
+
+# DINOv2 embeddings instead of YOLO's -- writes embeddings_dino.pt, skips detections.csv by default
+python scripts/classroom/detect_and_embed_classroom.py \
+  --out-dir outputs/classroom_detections --embedding-model dino
 ```
 
 ## 2. Diagnostics (optional, read-only against `embeddings.pt`/odometry)
@@ -133,7 +149,8 @@ dataset's own `frame_idx`, which isn't monotonic once sorted by
 
 $$\mathrm{ctx}^{\text{time}}(t) = B_t^{\,t/\ell_{\text{time}}}$$
 
-**Content** — every frame's 256-dim YOLO embedding $e_n$ projected to
+**Content** — every frame's D-dim embedding $e_n$ (raw output of
+`--embedding-model`: 256-dim for yolov8n, 384-dim for dinov2_vits14) projected to
 `hd_dim` phasor content via `random_project_to_phasor` (the "random-proj"
 encoder from `docs/associative_memory_math.md` §2: Gaussian projection
 $W\!\sim\!\mathcal N(0, 1/d_{in})$ to $(I,Q)$ pairs, normalized onto the unit
@@ -176,6 +193,17 @@ where $S$ is the subset of frame indices actually bundled in, chosen by
 The saved `.pt` also stores the codebook (content + context ground truth) for
 exactly the frames in $S$ — `query`/`evaluate` only ever cleanup-match
 against that same subset, never the full dataset.
+
+`--trim-stationary` narrows $S$ further, *before* any of the three `--subset`
+rules above are applied: this dataset's walk starts and ends with the robot
+parked (near-duplicate frames while it's not moving), which otherwise waste
+bundling capacity on content that carries no discriminative information.
+Detected from odometry, not the embeddings — a frame counts as stationary if
+it's within `--trim-distance-threshold` meters (default 0.1) of the median
+position of the first/last `--trim-anchor-frames` samples (default 15). The
+resulting `trim_start`/`trim_end` frame counts are recorded in the saved
+`.pt`, so `demo` (§7) automatically excludes the same range from its
+held-out set too, rather than needing the flag repeated.
 
 **Run** (the 8192-dim, PCA-whitened, uncertain-subset build from earlier in
 this conversation):
@@ -277,6 +305,11 @@ frames that weren't among the most distinctive" — still runs, but isn't a
 designed train/val split the way `stride` is.
 
 ## 8. End-to-end example
+
+`--embedding-model dino` is available on every command below in place of the
+default `yolo` (§1); every command's default input/output paths pick up a
+`_dino` suffix automatically to match, so a full DINO run is the same
+sequence with `--embedding-model dino` added throughout.
 
 ```bash
 # 1. detect + embed (once per dataset)

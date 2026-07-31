@@ -1,45 +1,52 @@
-"""Run YOLO and/or DINOv2 over the D455 RGB stream of the Spot Telluride
-classroom-walk dataset to get per-timestamp object detections and image
-embeddings.
+"""Run YOLO and/or DINOv2 over the Freiburg (ICL-NUIM "living room traj0")
+RGB PNG sequence to get per-frame object detections and image embeddings --
+the same shape of output as scripts/classroom/detect_and_embed_classroom.py,
+but reading local files instead of a HuggingFace dataset.
 
-    python scripts/classroom/detect_and_embed_classroom.py --out-dir outputs/classroom_detections
-    python scripts/classroom/detect_and_embed_classroom.py --out-dir outputs/classroom_detections --embedding-model dino
+    python scripts/freiburg/detect_and_embed_freiburg.py --out-dir outputs/freiburg_detections
+    python scripts/freiburg/detect_and_embed_freiburg.py --out-dir outputs/freiburg_detections --embedding-model dino
+
+data/frieburg/rgb/<frame>.png (frame = 0..1508, 640x480) is this dataset's
+only input this script touches -- depth/ is a separate render and out of
+scope here (RGB-only, per this comparison's goal). There's no real capture
+clock (this is a synthetic/rendered sequence, unlike the classroom D455
+recording), so timestamp_ns is synthesized at a nominal --fps (default 30,
+the standard ICL-NUIM rate) rather than read from metadata; every downstream
+duration/fps computation that consumes timestamp_ns (this script's
+--visualize, and scripts/freiburg/freiburg_associative_memory.py's `demo`)
+is therefore accurate relative to that assumed rate, not a measured one.
 
 Writes up to two files to --out-dir:
-- detections.csv: long format, one row per detected object
-  (frame_idx, timestamp_ns, class_id, class_name, confidence, x1, y1, x2, y2
-  in pixel coordinates; frames with zero detections contribute no rows).
-  Produced by YOLO only -- shared/backend-independent, so it's named the
-  same regardless of --embedding-model. Controlled by --detect: 'auto'
-  (default) runs it iff --embedding-model yolo (DINOv2 has no detection
-  head); 'on'/'off' force it either way.
+- detections.csv: long format, one row per detected object (frame_idx,
+  timestamp_ns, class_id, class_name, confidence, x1, y1, x2, y2 in pixel
+  coordinates; frames with zero detections contribute no rows). Produced by
+  YOLO only -- shared/backend-independent, so it's named the same regardless
+  of --embedding-model. Controlled by --detect: 'auto' (default) runs it iff
+  --embedding-model yolo (DINOv2 has no detection head); 'on'/'off' force it
+  either way.
 - embeddings.pt (or embeddings_dino.pt when --embedding-model dino): {
   "frame_idx": LongTensor, "timestamp_ns": LongTensor, "embedding":
-  FloatTensor[N, D]} — one feature vector per frame: the penultimate-layer
+  FloatTensor[N, D]} -- one feature vector per frame: the penultimate-layer
   YOLO feature (D=256 for yolov8n) or the frozen DINOv2 CLS embedding
-  (D=384 for the default dinov2_vits14), selected by --embedding-model.
-  Same dict shape as eval.py's --save-embeddings output (see
-  scripts/eval.py), for downstream use e.g. binding into an HD associative
-  memory (scripts/classroom/classroom_associative_memory.py).
-
-PNG decode and YOLO inference were both benchmarked as fast on this dataset
-(~0.9ms/image decode, ~15ms/image detect, ~9ms/image embed on Apple
-Silicon/MPS — under a minute total for all ~2478 D455 frames), so images are
-read directly from the Hugging Face dataset's local cache with no
-intermediate on-disk conversion.
+  (D=384 for the default dinov2_vits14), selected by --embedding-model. Same
+  dict shape as scripts/classroom/detect_and_embed_classroom.py's output,
+  for downstream use e.g. binding into an HD associative memory
+  (scripts/freiburg/freiburg_associative_memory.py).
 
 Detection and embedding are independently cacheable: each is (re)computed
 only if its own output file is missing or --force is passed, regardless of
 whether the other one already exists.
 
 Pass --visualize to also render observations.mp4 (or observations_dino.mp4)
-to --out-dir: D455 RGB with detection boxes drawn from detections.csv (if
-present), the robot's world-frame position/heading from odometry, and the
-embedding self-correlation matrix (from embeddings.pt) with a crosshair
-marking the current frame in time, side by side, played back at the
-dataset's native capture rate. --visualize can be combined with an existing
-run (detection/embedding are skipped, only the video is (re)built).
---viz-force redoes the video; by default it's skipped if it already exists.
+to --out-dir: RGB with detection boxes drawn from detections.csv (if
+present), the ground-truth camera trajectory/heading (from
+data/frieburg/livingRoom0.gt.freiburg), and the embedding self-correlation
+matrix (from embeddings.pt) with a crosshair marking the current frame in
+time, side by side, played back at --fps. Frame 0 has no ground-truth pose
+in this dataset (poses start at frame 1) and is skipped in the video only.
+--visualize can be combined with an existing run (detection/embedding are
+skipped, only the video is (re)built). --viz-force redoes the video; by
+default it's skipped if it already exists.
 """
 
 from __future__ import annotations
@@ -50,7 +57,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from datasets import load_dataset
 from PIL import Image
 
 import matplotlib
@@ -62,7 +68,8 @@ from matplotlib.patches import Rectangle  # noqa: E402
 from vsa_cognitive_mapping.data import IMAGENET_MEAN, IMAGENET_STD
 from vsa_cognitive_mapping.encoder import load_backbone
 
-REPO = "lorinachey/spot-telluride-workshop-dataset"
+RGB_DIR = "data/frieburg/rgb"
+GT_PATH = "data/frieburg/livingRoom0.gt.freiburg"
 
 SURFACE = "#fcfcfb"
 INK_PRIMARY = "#0b0b0b"
@@ -97,6 +104,14 @@ def with_suffix_for_model(path: Path, embedding_model: str) -> Path:
     return path if embedding_model == "yolo" else path.with_stem(path.stem + "_dino")
 
 
+def list_frames(rgb_dir: Path) -> list[tuple[int, Path]]:
+    """(frame_idx, path) pairs sorted numerically by filename stem (0.png,
+    1.png, ..., 1508.png) -- a plain lexicographic sort would put 10.png
+    before 2.png."""
+    frames = [(int(p.stem), p) for p in rgb_dir.glob("*.png")]
+    return sorted(frames, key=lambda t: t[0])
+
+
 def load_yolo_model(yolo_model: str) -> YOLO:
     """Lazily import ultralytics -- only called when detection or a YOLO
     embedding pass actually runs, so a pure-DINO run (--embedding-model dino
@@ -125,9 +140,8 @@ DINO_PATCH_SIZE = 14  # all public dinov2_*14 hub entrypoints use patch size 14
 def preprocess_dino_batch(images: list[np.ndarray], img_size: int) -> torch.Tensor:
     """List of HxWx3 uint8 RGB arrays -> float32 (B, 3, img_size, img_size)
     tensor, ImageNet-normalized -- same resize/normalize formula as
-    vsa_cognitive_mapping.data.load_image, but starting from an
-    already-decoded array (these frames come from the HF dataset in memory
-    and never touch disk as PNGs) instead of a file path."""
+    vsa_cognitive_mapping.data.load_image, starting from an already-decoded
+    array."""
     resized = [
         np.asarray(Image.fromarray(img).resize((img_size, img_size), Image.Resampling.BILINEAR),
                   dtype=np.float32) / 255.0
@@ -149,20 +163,41 @@ def run_embed_dino(backbone: torch.nn.Module, images: list[np.ndarray], device: 
     return list(backbone(batch).cpu().unbind(0))
 
 
-def quat_to_yaw(qx: np.ndarray, qy: np.ndarray, qz: np.ndarray, qw: np.ndarray) -> np.ndarray:
-    """Yaw (rotation about z, radians) from unit quaternions."""
-    return np.arctan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy ** 2 + qz ** 2))
+def load_gt_poses(gt_path: Path) -> dict[str, np.ndarray]:
+    """data/frieburg/livingRoom0.gt.freiburg -> {frame_id, tx, ty, tz, qx,
+    qy, qz, qw} arrays, one row per line (`frame_id tx ty tz qx qy qz qw`).
+    Frame numbering starts at 1 (frame 0.png has no ground-truth pose)."""
+    frame_id, tx, ty, tz, qx, qy, qz, qw = [], [], [], [], [], [], [], []
+    with open(gt_path) as f:
+        for line in f:
+            parts = line.split()
+            if not parts:
+                continue
+            fid, x, y, z, a, b, c, d = parts
+            frame_id.append(int(fid))
+            tx.append(float(x)); ty.append(float(y)); tz.append(float(z))
+            qx.append(float(a)); qy.append(float(b)); qz.append(float(c)); qw.append(float(d))
+    return {
+        "frame_id": np.array(frame_id, dtype=np.int64),
+        "tx": np.array(tx), "ty": np.array(ty), "tz": np.array(tz),
+        "qx": np.array(qx), "qy": np.array(qy), "qz": np.array(qz), "qw": np.array(qw),
+    }
 
 
-def nearest_index(sorted_ts: np.ndarray, query_ts: int) -> int:
-    """Index into ascending sorted_ts closest to query_ts."""
-    i = np.searchsorted(sorted_ts, query_ts)
-    if i == 0:
-        return 0
-    if i == len(sorted_ts):
-        return len(sorted_ts) - 1
-    before, after = sorted_ts[i - 1], sorted_ts[i]
-    return int(i - 1 if query_ts - before <= after - query_ts else i)
+def camera_heading_xz(qx: np.ndarray, qy: np.ndarray, qz: np.ndarray, qw: np.ndarray) -> np.ndarray:
+    """Angle (radians) of the camera's forward (local +z) axis projected
+    onto the world x-z plane -- this dataset's ground-truth quaternion
+    convention has y as the vertical axis (tx/tz range over ~0.5-1.9m,
+    consistent with a room footprint; ty ranges over ~1.2m, consistent with
+    camera height/tilt changes), so x-z is the floor plane here, playing
+    the role the classroom dataset's world-frame (x, y) with z-up heading
+    does. Derived from the quaternion's local-z-axis rotation-matrix column
+    (2*(qx*qz+qw*qy), *, 1-2*(qx^2+qy^2)), atan2'd over its x/z components
+    rather than an Euler yaw decomposition, so it's correct regardless of
+    which axis-order convention the recording used."""
+    forward_x = 2.0 * (qx * qz + qw * qy)
+    forward_z = 1.0 - 2.0 * (qx ** 2 + qy ** 2)
+    return np.arctan2(forward_x, forward_z)
 
 
 def load_detections_by_frame(det_path: Path) -> dict[int, pd.DataFrame]:
@@ -192,35 +227,36 @@ def draw_boxes(ax, prior_artists: list, frame_dets: pd.DataFrame | None) -> list
     return new_artists
 
 
-def build_visualization(rgb, det_path: Path, emb_path: Path, out_path: Path, repo: str,
-                        odom_config: str, n_frames: int, fps: float | None) -> None:
-    """Render observations.mp4: D455 RGB + detection boxes, world-frame
-    position/heading, and the embedding self-correlation matrix with a
+def build_visualization(frames: list[tuple[int, Path]], gt_path: Path, det_path: Path, emb_path: Path,
+                        out_path: Path, fps: float) -> None:
+    """Render observations.mp4: RGB + detection boxes, ground-truth
+    trajectory/heading, and the embedding self-correlation matrix with a
     crosshair marking the current frame, side by side -- one video frame per
-    D455 RGB frame, at the dataset's native capture rate unless fps is given.
+    posed RGB frame (frame 0 excluded, no ground-truth pose), at --fps.
     """
-    print(f"loading {odom_config} for visualization...")
-    odom_ds = load_dataset(repo, odom_config, split="train").sort("timestamp_ns")
-    odom_ts = np.array(odom_ds["timestamp_ns"])
-    odom_x, odom_y = np.array(odom_ds["x"]), np.array(odom_ds["y"])
-    odom_yaw = quat_to_yaw(np.array(odom_ds["qx"]), np.array(odom_ds["qy"]),
-                           np.array(odom_ds["qz"]), np.array(odom_ds["qw"]))
+    print(f"loading ground-truth poses from {gt_path}...")
+    gt = load_gt_poses(gt_path)
+    pose_row_by_frame = {int(fid): i for i, fid in enumerate(gt["frame_id"])}
+    heading = camera_heading_xz(gt["qx"], gt["qy"], gt["qz"], gt["qw"])
+
+    posed_frames = [(fidx, path) for fidx, path in frames if fidx in pose_row_by_frame]
+    n_frames = len(posed_frames)
+    dropped = len(frames) - n_frames
+    if dropped:
+        print(f"{dropped} frame(s) with no ground-truth pose excluded from the video")
 
     print(f"loading detections from {det_path}...")
     det_by_frame = load_detections_by_frame(det_path)
 
     print(f"loading embeddings from {emb_path}...")
-    # Positional slice, not a frame_idx lookup: both detect_and_embed's write
-    # loop and the sorted RGB dataset append/index in the same timestamp
-    # order, so row i of embeddings.pt is frame i here too.
-    embeddings = torch.load(emb_path)["embedding"].numpy()[:n_frames]
+    emb_data = torch.load(emb_path)
+    emb_frame_idx = emb_data["frame_idx"].numpy()
+    emb_by_frame = {int(f): i for i, f in enumerate(emb_frame_idx)}
+    embeddings = emb_data["embedding"].numpy()
     corr = np.corrcoef(embeddings)
     corr_vmin, corr_vmax = corr.min(), corr.max()
+    corr_row_for = [emb_by_frame[fidx] for fidx, _ in posed_frames]
 
-    rgb_ts = np.array(rgb["timestamp_ns"][:n_frames])
-    if fps is None:
-        duration_s = (rgb_ts[-1] - rgb_ts[0]) / 1e9
-        fps = (n_frames - 1) / duration_s if duration_s > 0 else 30.0
     print(f"rendering {n_frames} frames at {fps:.2f} fps -> {out_path}")
 
     fig = plt.figure(figsize=(16, 6), facecolor=SURFACE, constrained_layout=True)
@@ -229,29 +265,30 @@ def build_visualization(rgb, det_path: Path, emb_path: Path, out_path: Path, rep
     ax_pos = fig.add_subplot(gs[0, 1])
     ax_corr = fig.add_subplot(gs[0, 2])
 
-    rgb_im = ax_rgb.imshow(np.asarray(rgb[0]["image"].convert("RGB")))
+    first_frame, first_path = posed_frames[0]
+    rgb_im = ax_rgb.imshow(np.asarray(Image.open(first_path).convert("RGB")))
     ax_rgb.axis("off")
-    ax_rgb.set_title("D455 RGB + detections", color=INK_PRIMARY, fontsize=11, pad=8)
+    ax_rgb.set_title("Freiburg RGB + detections", color=INK_PRIMARY, fontsize=11, pad=8)
     box_artists: list = []
 
-    ax_pos.plot(odom_x, odom_y, color=BLUE, linewidth=2, label="path", zorder=2)
-    cur_point = ax_pos.scatter([odom_x[0]], [odom_y[0]], color=RED, s=60, zorder=3, label="current")
-    arrow_len = 0.08 * max(np.ptp(odom_x), np.ptp(odom_y), 1e-3)
-    # quiver (not annotate) so the arrow is a normal data artist that can be
-    # moved in place each frame via set_offsets/set_UVC.
-    heading = ax_pos.quiver([odom_x[0]], [odom_y[0]], [arrow_len], [0.0],
-                            color=RED, angles="xy", scale_units="xy", scale=1, width=0.01, zorder=4)
+    order = np.argsort(gt["frame_id"])
+    traj_x, traj_z = gt["tx"][order], gt["tz"][order]
+    ax_pos.plot(traj_x, traj_z, color=BLUE, linewidth=2, label="path", zorder=2)
+    cur_point = ax_pos.scatter([traj_x[0]], [traj_z[0]], color=RED, s=60, zorder=3, label="current")
+    arrow_len = 0.08 * max(np.ptp(traj_x), np.ptp(traj_z), 1e-3)
+    heading_q = ax_pos.quiver([traj_x[0]], [traj_z[0]], [arrow_len], [0.0],
+                             color=RED, angles="xy", scale_units="xy", scale=1, width=0.01, zorder=4)
     ax_pos.set_aspect("equal")
     ax_pos.margins(0.15)
     ax_pos.set_facecolor(SURFACE)
-    ax_pos.set_title("Position & heading (world frame)", color=INK_PRIMARY, fontsize=11, pad=8)
+    ax_pos.set_title("Position & heading (ground truth, x-z plane)", color=INK_PRIMARY, fontsize=11, pad=8)
     ax_pos.tick_params(colors=INK_MUTED, labelsize=7)
     for spine in ax_pos.spines.values():
         spine.set_color(GRID)
     ax_pos.grid(color=GRID, linewidth=0.6)
     ax_pos.set_axisbelow(True)
     ax_pos.set_xlabel("x (m)", color=INK_MUTED, fontsize=8)
-    ax_pos.set_ylabel("y (m)", color=INK_MUTED, fontsize=8)
+    ax_pos.set_ylabel("z (m)", color=INK_MUTED, fontsize=8)
     legend = ax_pos.legend(loc="best", fontsize=8, facecolor=SURFACE, edgecolor=GRID)
     for text in legend.get_texts():
         text.set_color(INK_SECONDARY)
@@ -267,33 +304,26 @@ def build_visualization(rgb, det_path: Path, emb_path: Path, out_path: Path, rep
     cbar = fig.colorbar(corr_im, ax=ax_corr, fraction=0.046, pad=0.04)
     cbar.set_label("Pearson correlation", color=INK_SECONDARY, fontsize=8)
     cbar.ax.tick_params(colors=INK_MUTED, labelsize=6)
-    # Crosshair over the current frame's row/column -- its intersection is
-    # "now"; a bright cell where it crosses an off-diagonal band means the
-    # robot's current view correlates with a moment earlier in the walk
-    # (e.g. a revisited spot in the room).
     corr_hline = ax_corr.axhline(0, color=RED, linewidth=1.2, zorder=5)
     corr_vline = ax_corr.axvline(0, color=RED, linewidth=1.2, zorder=5)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    writer = FFMpegWriter(fps=fps, metadata={"title": "classroom RGBD observations"})
+    writer = FFMpegWriter(fps=fps, metadata={"title": "Freiburg RGB observations"})
     with writer.saving(fig, str(out_path), dpi=120):
-        for i in range(n_frames):
-            row = rgb[i]
-            ts = row["timestamp_ns"]
+        for i, (fidx, path) in enumerate(posed_frames):
+            rgb_im.set_data(np.asarray(Image.open(path).convert("RGB")))
+            box_artists = draw_boxes(ax_rgb, box_artists, det_by_frame.get(fidx))
 
-            rgb_im.set_data(np.asarray(row["image"].convert("RGB")))
-            box_artists = draw_boxes(ax_rgb, box_artists, det_by_frame.get(int(row["frame_idx"])))
+            pose_i = pose_row_by_frame[fidx]
+            cur_point.set_offsets([[gt["tx"][pose_i], gt["tz"][pose_i]]])
+            heading_q.set_offsets([[gt["tx"][pose_i], gt["tz"][pose_i]]])
+            heading_q.set_UVC(arrow_len * np.cos(heading[pose_i]), arrow_len * np.sin(heading[pose_i]))
 
-            odom_i = nearest_index(odom_ts, ts)
-            cur_point.set_offsets([[odom_x[odom_i], odom_y[odom_i]]])
-            heading.set_offsets([[odom_x[odom_i], odom_y[odom_i]]])
-            heading.set_UVC(arrow_len * np.cos(odom_yaw[odom_i]), arrow_len * np.sin(odom_yaw[odom_i]))
+            corr_row = corr_row_for[i]
+            corr_hline.set_ydata([corr_row, corr_row])
+            corr_vline.set_xdata([corr_row, corr_row])
 
-            corr_hline.set_ydata([i, i])
-            corr_vline.set_xdata([i, i])
-
-            fig.suptitle(f"frame {i + 1}/{n_frames}   t={(ts - rgb_ts[0]) / 1e9:.2f}s",
-                        color=INK_SECONDARY, fontsize=10)
+            fig.suptitle(f"frame {i + 1}/{n_frames}   t={i / fps:.2f}s", color=INK_SECONDARY, fontsize=10)
             writer.grab_frame()
 
             if (i + 1) % 200 == 0 or i + 1 == n_frames:
@@ -306,9 +336,9 @@ def build_visualization(rgb, det_path: Path, emb_path: Path, out_path: Path, rep
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--repo", default=REPO)
-    parser.add_argument("--d455-rgb-config", default="rgb_d455")
-    parser.add_argument("--out-dir", default="outputs/classroom_detections")
+    parser.add_argument("--rgb-dir", default=RGB_DIR)
+    parser.add_argument("--gt-path", default=GT_PATH, help="used only by --visualize")
+    parser.add_argument("--out-dir", default="outputs/freiburg_detections")
     parser.add_argument("--embedding-model", choices=["yolo", "dino"], default="yolo",
                         help="backend for embeddings.pt: 'yolo' (YOLOv8n penultimate-layer "
                              "features, 256-dim) or 'dino' (frozen DINOv2 CLS embedding, "
@@ -318,42 +348,36 @@ def main() -> None:
     parser.add_argument("--detect", choices=["auto", "on", "off"], default="auto",
                         help="whether to run YOLO object detection (detections.csv): 'auto' = "
                              "on when --embedding-model yolo, off when --embedding-model dino "
-                             "(DINOv2 has no detection head); 'on'/'off' force it either way, "
-                             "e.g. --detect on --embedding-model dino gets YOLO boxes alongside "
-                             "DINO embeddings at the cost of an extra forward pass")
+                             "(DINOv2 has no detection head); 'on'/'off' force it either way")
     parser.add_argument("--yolo-model", default="yolov8n.pt",
                         help="ultralytics checkpoint name or path to a custom .pt (used for "
                              "detection and/or when --embedding-model yolo)")
     parser.add_argument("--dino-model", default="dinov2_vits14",
                         help="torch.hub facebookresearch/dinov2 entrypoint, used when "
-                             "--embedding-model dino (default matches "
-                             "src/vsa_cognitive_mapping/encoder.py's convention). Downloads on "
-                             "first use (requires network access; cached under "
-                             "~/.cache/torch/hub, override via $TORCH_HOME)")
+                             "--embedding-model dino. Downloads on first use (requires network "
+                             "access; cached under ~/.cache/torch/hub, override via $TORCH_HOME)")
     parser.add_argument("--dino-img-size", type=int, default=224,
-                        help="resize D455 frames to this square size before the DINOv2 "
-                             "forward pass; must be a multiple of the patch size (14) -- "
-                             "default 224 = 16*14, matches "
-                             "vsa_cognitive_mapping.data.load_image's default")
+                        help="resize frames to this square size before the DINOv2 forward pass; "
+                             "must be a multiple of the patch size (14)")
     parser.add_argument("--device", default="auto", choices=["auto", "cuda", "mps", "cpu"])
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--conf", type=float, default=0.25,
                         help="detection confidence threshold (only used when detection runs)")
+    parser.add_argument("--fps", type=float, default=30.0,
+                        help="nominal capture rate used to synthesize timestamp_ns (this "
+                             "dataset has no real capture clock) and, by default, --viz-fps")
     parser.add_argument("--limit", type=int, default=None, help="only process the first N frames")
     parser.add_argument("--force", action="store_true",
                         help="regenerate the applicable outputs even if they already exist")
     parser.add_argument("--visualize", action="store_true",
-                        help="also render observations.mp4 (D455 RGB + detections, robot "
-                             "position/heading, embedding self-correlation) to --out-dir")
+                        help="also render observations.mp4 (RGB + detections, ground-truth "
+                             "trajectory/heading, embedding self-correlation) to --out-dir")
     parser.add_argument("--viz-out", default=None,
                         help="output video path (default: <out-dir>/observations.mp4, or "
                              "observations_dino.mp4 if --embedding-model dino)")
-    parser.add_argument("--viz-fps", type=float, default=None,
-                        help="output video frame rate (default: matches the dataset's native "
-                             "capture rate, i.e. real-time playback)")
+    parser.add_argument("--viz-fps", type=float, default=None, help="default: --fps")
     parser.add_argument("--viz-force", action="store_true",
                         help="rebuild observations.mp4 even if it already exists at the target path")
-    parser.add_argument("--odom-config", default="odometry_lio_sam")
     args = parser.parse_args()
 
     if args.embedding_model == "dino" and args.dino_img_size % DINO_PATCH_SIZE != 0:
@@ -381,11 +405,13 @@ def main() -> None:
         print(f"{viz_out} already exists, skipping visualization (pass --viz-force to regenerate)")
 
     need_process = need_detect or need_embed
-    rgb, n_frames = None, None
+    frames: list[tuple[int, Path]] = []
     if need_process or need_visualize:
-        print(f"loading {args.repo} ({args.d455_rgb_config})...")
-        rgb = load_dataset(args.repo, args.d455_rgb_config, split="train").sort("timestamp_ns")
-        n_frames = len(rgb) if args.limit is None else min(args.limit, len(rgb))
+        print(f"listing frames in {args.rgb_dir}...")
+        frames = list_frames(Path(args.rgb_dir))
+        if args.limit is not None:
+            frames = frames[:args.limit]
+        print(f"found {len(frames)} frames")
 
     if need_process:
         device = resolve_device(args.device)
@@ -402,15 +428,17 @@ def main() -> None:
 
         det_rows = []
         frame_idxs, timestamps, embeds = [], [], []
+        n_frames = len(frames)
         for start in range(0, n_frames, args.batch_size):
             end = min(start + args.batch_size, n_frames)
-            batch = rgb[start:end]
-            images = [np.asarray(img) for img in batch["image"]]
+            batch = frames[start:end]
+            images = [np.asarray(Image.open(path).convert("RGB")) for _, path in batch]
 
             if need_detect:
                 detections = run_detect(model, images, device, args.conf)
                 for j, result in enumerate(detections):
-                    frame_idx, ts = batch["frame_idx"][j], batch["timestamp_ns"][j]
+                    frame_idx = batch[j][0]
+                    ts = round(frame_idx / args.fps * 1e9)
                     boxes = result.boxes
                     for k in range(len(boxes)):
                         x1, y1, x2, y2 = boxes.xyxy[k].tolist()
@@ -423,8 +451,9 @@ def main() -> None:
                 embeddings = (run_embed_yolo(model, images, device) if args.embedding_model == "yolo"
                              else run_embed_dino(backbone, images, device, args.dino_img_size))
                 for j, embedding in enumerate(embeddings):
-                    frame_idxs.append(batch["frame_idx"][j])
-                    timestamps.append(batch["timestamp_ns"][j])
+                    frame_idx = batch[j][0]
+                    frame_idxs.append(frame_idx)
+                    timestamps.append(round(frame_idx / args.fps * 1e9))
                     embeds.append(embedding.cpu())
 
             status = []
@@ -445,8 +474,8 @@ def main() -> None:
             print(f"embeddings written to {emb_path} ({len(embeds)} frames)")
 
     if need_visualize:
-        build_visualization(rgb, det_path, emb_path, viz_out, args.repo, args.odom_config,
-                            n_frames, args.viz_fps)
+        viz_fps = args.viz_fps if args.viz_fps is not None else args.fps
+        build_visualization(frames, Path(args.gt_path), det_path, emb_path, viz_out, viz_fps)
 
 
 if __name__ == "__main__":

@@ -1,61 +1,31 @@
-"""Bind YOLO content to position/heading/time context, bundle into three
-separate associative memories, and recall "what did I see at this
-position/heading/time?" by unbind + cleanup lookup.
+"""Bind Freiburg (ICL-NUIM "living room traj0") content to
+position/heading/time context, bundle into three separate associative
+memories, and recall "what did I see at this position/heading/time?" by
+unbind + cleanup lookup -- the Freiburg counterpart of
+scripts/classroom/classroom_associative_memory.py, binding against
+data/frieburg/livingRoom0.gt.freiburg's ground-truth camera poses instead of
+Spot's odometry.
 
-    python scripts/classroom/classroom_associative_memory.py build --subset all
-    python scripts/classroom/classroom_associative_memory.py build --subset uncertain
-    python scripts/classroom/classroom_associative_memory.py query --memory outputs/classroom_detections/associative_memory_all.pt --query-x -2.0 --query-y 3.0
-    python scripts/classroom/classroom_associative_memory.py evaluate --memory outputs/classroom_detections/associative_memory_all.pt
+    python scripts/freiburg/freiburg_associative_memory.py build --subset all
+    python scripts/freiburg/freiburg_associative_memory.py build --subset uncertain
+    python scripts/freiburg/freiburg_associative_memory.py query --memory outputs/freiburg_detections/associative_memory_all.pt --query-x 0.05 --query-y -1.5
+    python scripts/freiburg/freiburg_associative_memory.py evaluate --memory outputs/freiburg_detections/associative_memory_all.pt
 
 For each frame i, content_i = random_project_to_phasor(embedding_i) (see
-scripts/classroom/detect_and_embed_classroom.py for the raw embeddings) and
+scripts/freiburg/detect_and_embed_freiburg.py for the raw embeddings) and
 context_i = one of three independent phasor codes -- position (Bx**x * By**y),
-heading (a circular-safe base**yaw), or time (Bt**row_idx) -- computed with
-the exact same encoders as scripts/classroom/plot_pose_time_heading_correlation.py.
-Three SEPARATE memories are built, one per axis:
-
-    memory_<axis> = bundle(content_1 * context_1, ..., content_M * context_M)
-
-kept apart rather than bound into one combined quad-binding, so each only
-has to discriminate along its own axis. Recall (`query`) unbinds a memory by
-a candidate context to get a noisy residual, then runs cleanup
-(vsa.py's best_matches) against a codebook of the content vectors that were
-actually bundled in, restricted to the frames used for that memory's build.
-
-`build --subset all` bundles every frame -- general recall, and a real test
-of whether ~2,478 distinct items overwhelm an hd-dim=256 memory (bundling
-capacity is roughly proportional to dimensionality, so this is expected to
-be noisy). `build --subset uncertain` bundles only the top fraction of
-frames by embedding uncertainty (scripts/classroom/plot_embedding_uncertainty.py's
-adjacent_frame_uncertainty/global_frame_uncertainty over the raw-embedding
-cosine self-correlation) -- fewer, more distinctive items bundled together
-should mean less crosstalk. `evaluate` measures this directly: for each
-memory, query every stored frame's own exact context and measure how far
-(L1 mean / L2 root-mean-square, in physical units -- meters, radians,
-frames) the top-1 recalled frame's true context is from the query -- exact
-top-1/top-k match rate turned out to be too harsh a measure on its own
-(near-duplicate frames make an "almost right" recall look identical to a
-wildly wrong one), so physical error is what's reported and compared across
-`all` vs. `uncertain` builds.
-
-`build --subset stride --stride 3` bundles every third frame -- a train
-split -- leaving the other two thirds held out. `demo` runs the *reverse*
-query direction over those held-out frames: instead of context -> content
-("what did I see at this position?"), it's content -> context ("where/when
-have I seen something like this before?") -- unbind each memory by the
-*current* frame's own content to get a residual, then instead of collapsing
-to a single best-guess point, evaluate that residual's similarity
-continuously over a dense grid of candidate positions (a heatmap) and a
-dense sweep of candidate headings (a polar plot), so genuine ambiguity
-(two similar-looking spots) is visible rather than hidden behind an
-arbitrary argmax. Time recall stays a discrete lookup against the train
-codebook (recalling a specific past frame, not a continuous quantity).
-Renders one video frame per held-out frame, in chronological order --
-Spot moving through the room while the memory answers "have I been here
-before?" the whole way:
-
-    python scripts/classroom/classroom_associative_memory.py build --subset stride --stride 3
-    python scripts/classroom/classroom_associative_memory.py demo --memory outputs/classroom_detections/associative_memory_stride.pt
+heading (a circular-safe base**yaw), or time (Bt**row_idx). "Position" here
+is (tx, tz) from the ground-truth pose file (this dataset's quaternion
+convention has y as the vertical axis -- see camera_heading_xz below -- so
+x-z is the floor plane, the analogue of the classroom's world-frame (x, y)
+with z-up) and "heading" is the camera's forward direction projected onto
+that plane. Frame 0 has no ground-truth pose in this dataset and is dropped
+before binding (see load_frame_data). Same three-separate-memories design,
+recall, `evaluate`, `--subset stride` + `demo` "have I seen this before?"
+video as the classroom script -- see its docstring and
+docs/classroom_associative_memory_math.md for the full pipeline writeup;
+this module only re-derives the parts that depend on how position/heading
+context and RGB frames are obtained.
 """
 
 import argparse
@@ -64,7 +34,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from datasets import load_dataset
+from PIL import Image
 
 import matplotlib
 matplotlib.use("Agg")
@@ -75,7 +45,6 @@ from matplotlib.patches import Rectangle  # noqa: E402
 
 from vsa_cognitive_mapping.vsa import (
     Phasor,
-    best_matches,
     cosine_self_correlation,
     pca_components,
     phasor_correlation_matrix,
@@ -83,7 +52,8 @@ from vsa_cognitive_mapping.vsa import (
     random_project_to_phasor,
 )
 
-REPO = "lorinachey/spot-telluride-workshop-dataset"
+RGB_DIR = "data/frieburg/rgb"
+GT_PATH = "data/frieburg/livingRoom0.gt.freiburg"
 
 SURFACE = "#fcfcfb"
 INK_PRIMARY = "#0b0b0b"
@@ -92,13 +62,10 @@ INK_MUTED = "#898781"
 GRID = "#e1e0d9"
 BLUE = "#2a78d6"
 RED = "#e34948"
-MAGENTA = "#e87ba4"  # third accent, for the temporal (Kalman) position estimate --
-                     # distinct from RED and from viridis's blue-green-yellow
-                     # heatmap ramp (BLUE/RED are already used elsewhere)
 CLASS_CMAP = plt.get_cmap("tab20")
 
 # Signed [-1, 1] correlation -> diverging, same validated pair
-# scripts/associative_memory.py, scripts/encoder_sweep.py, and the other
+# scripts/associative_memory.py, scripts/encoder_sweep.py, and the
 # scripts/classroom/ scripts each define locally.
 DIVERGING_CMAP = mcolors.LinearSegmentedColormap.from_list(
     "blue_gray_red", ["#2a78d6", "#f0efec", "#e34948"])
@@ -107,22 +74,44 @@ AXES = ("position", "heading", "time")
 
 
 # ---------------------------------------------------------------------------
-# Helpers duplicated from sibling classroom scripts (repo convention: each
-# script stays self-contained rather than importing another script).
+# Helpers duplicated from scripts/freiburg/detect_and_embed_freiburg.py and
+# scripts/classroom (repo convention: each script stays self-contained
+# rather than importing another script).
 # ---------------------------------------------------------------------------
 
-def quat_to_yaw(qx: np.ndarray, qy: np.ndarray, qz: np.ndarray, qw: np.ndarray) -> np.ndarray:
-    return np.arctan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy ** 2 + qz ** 2))
+def camera_heading_xz(qx: np.ndarray, qy: np.ndarray, qz: np.ndarray, qw: np.ndarray) -> np.ndarray:
+    """Angle (radians) of the camera's forward (local +z) axis projected
+    onto the world x-z plane -- see
+    scripts/freiburg/detect_and_embed_freiburg.py's copy of this function
+    for the derivation and why x-z (not x-y) is this dataset's floor plane."""
+    forward_x = 2.0 * (qx * qz + qw * qy)
+    forward_z = 1.0 - 2.0 * (qx ** 2 + qy ** 2)
+    return np.arctan2(forward_x, forward_z)
 
 
-def nearest_index(sorted_ts: np.ndarray, query_ts: int) -> int:
-    i = np.searchsorted(sorted_ts, query_ts)
-    if i == 0:
-        return 0
-    if i == len(sorted_ts):
-        return len(sorted_ts) - 1
-    before, after = sorted_ts[i - 1], sorted_ts[i]
-    return int(i - 1 if query_ts - before <= after - query_ts else i)
+def load_gt_poses(gt_path: Path) -> dict[str, np.ndarray]:
+    """data/frieburg/livingRoom0.gt.freiburg -> {frame_id, tx, ty, tz, qx,
+    qy, qz, qw} arrays. Frame numbering starts at 1 (frame 0.png has no
+    ground-truth pose)."""
+    frame_id, tx, ty, tz, qx, qy, qz, qw = [], [], [], [], [], [], [], []
+    with open(gt_path) as f:
+        for line in f:
+            parts = line.split()
+            if not parts:
+                continue
+            fid, x, y, z, a, b, c, d = parts
+            frame_id.append(int(fid))
+            tx.append(float(x)); ty.append(float(y)); tz.append(float(z))
+            qx.append(float(a)); qy.append(float(b)); qz.append(float(c)); qw.append(float(d))
+    return {
+        "frame_id": np.array(frame_id, dtype=np.int64),
+        "tx": np.array(tx), "ty": np.array(ty), "tz": np.array(tz),
+        "qx": np.array(qx), "qy": np.array(qy), "qz": np.array(qz), "qw": np.array(qw),
+    }
+
+
+def load_rgb_image(rgb_dir: Path, frame_idx: int) -> Image.Image:
+    return Image.open(rgb_dir / f"{frame_idx}.png").convert("RGB")
 
 
 def encode_time(row_idx: np.ndarray, hd_dim: int, seed: int, length_scale: float) -> np.ndarray:
@@ -145,20 +134,12 @@ def encode_heading(yaw: np.ndarray, hd_dim: int, seed: int, max_freq: int) -> np
 
 
 def heading_sweep_codes(hd_dim: int, seed: int, max_freq: int, n_angles: int) -> tuple[np.ndarray, np.ndarray]:
-    """Evaluate the heading base at a dense sweep of candidate angles ->
-    (angles, codes), for a continuous similarity-vs-heading curve rather
-    than only the handful of angles that happen to appear in the codebook.
-    Same encoder encode_heading uses per frame, just swept densely."""
     angles = np.linspace(-np.pi, np.pi, n_angles, endpoint=False)
     return angles, encode_heading(angles, hd_dim, seed, max_freq)
 
 
 def position_grid_codes(x_range: tuple[float, float], y_range: tuple[float, float], resolution: int,
                         hd_dim: int, x_seed: int, y_seed: int, length_scale: float):
-    """Evaluate the position code on a dense (resolution x resolution) grid
-    over the given extent -> (grid_x, grid_y, codes), for a continuous
-    similarity heatmap rather than only the discrete codebook positions.
-    Same encoder encode_position uses per frame, just swept over a grid."""
     grid_x = np.linspace(*x_range, resolution)
     grid_y = np.linspace(*y_range, resolution)
     gx, gy = np.meshgrid(grid_x, grid_y)
@@ -181,10 +162,6 @@ def global_frame_uncertainty(corr: np.ndarray) -> np.ndarray:
 
 
 def with_suffix_for_model(path: Path, embedding_model: str) -> Path:
-    """Insert a _dino suffix before the extension when embedding_model is
-    'dino', so both backends' default outputs coexist under the same
-    output directory without clobbering each other; 'yolo' leaves the path
-    unchanged (backward compatible with every existing default filename)."""
     return path if embedding_model == "yolo" else path.with_stem(path.stem + "_dino")
 
 
@@ -197,10 +174,6 @@ def load_detections_by_frame(det_path: Path) -> dict[int, pd.DataFrame]:
 
 
 def draw_boxes(ax, prior_artists: list, frame_dets: pd.DataFrame | None) -> list:
-    """Remove the previous frame's boxes/labels and draw this frame's,
-    returning the new artists -- safe to call once for a static plot
-    (prior_artists=[]) or every frame of a video (pass back the return
-    value each time, matching detect_and_embed_classroom.py's draw_boxes)."""
     for artist in prior_artists:
         artist.remove()
     if frame_dets is None:
@@ -222,40 +195,49 @@ def draw_boxes(ax, prior_artists: list, frame_dets: pd.DataFrame | None) -> list
 # Shared data loading
 # ---------------------------------------------------------------------------
 
-def load_frame_data(repo: str, d455_rgb_config: str, odom_config: str, embeddings_path: str | Path,
-                    limit: int | None) -> dict:
+def load_frame_data(embeddings_path: str | Path, gt_path: str | Path, limit: int | None) -> dict:
     print(f"loading {embeddings_path}...")
     data = torch.load(embeddings_path)
     embeddings_t = data["embedding"]
-    dataset_frame_idx = data["frame_idx"].numpy()
-    n_frames = len(embeddings_t) if limit is None else min(limit, len(embeddings_t))
-    embeddings_t = embeddings_t[:n_frames]
-    dataset_frame_idx = dataset_frame_idx[:n_frames]
+    frame_idx_all = data["frame_idx"].numpy()
+    timestamp_all = data["timestamp_ns"].numpy()
+    if limit is not None:
+        embeddings_t = embeddings_t[:limit]
+        frame_idx_all = frame_idx_all[:limit]
+        timestamp_all = timestamp_all[:limit]
 
-    print(f"loading {repo} ({d455_rgb_config}, {odom_config})...")
-    rgb = load_dataset(repo, d455_rgb_config, split="train").sort("timestamp_ns")
-    odom = load_dataset(repo, odom_config, split="train").sort("timestamp_ns")
+    print(f"loading {gt_path}...")
+    gt = load_gt_poses(Path(gt_path))
+    pose_row_by_frame = {int(fid): i for i, fid in enumerate(gt["frame_id"])}
 
-    rgb_ts = np.array(rgb["timestamp_ns"][:n_frames])
-    # Row position, not the dataset's own frame_idx field -- see the fix in
-    # plot_pose_time_heading_correlation.py: frame_idx isn't monotonic once
-    # sorted by timestamp_ns, timestamp_ns is.
-    row_idx = np.arange(n_frames)
+    # Frame 0 has no ground-truth pose in this dataset (poses start at frame
+    # 1) -- drop any embedded frame that can't be bound to a position/
+    # heading, rather than inventing one.
+    has_pose = np.array([int(f) in pose_row_by_frame for f in frame_idx_all])
+    n_dropped = int((~has_pose).sum())
+    if n_dropped:
+        print(f"{n_dropped} frame(s) have no ground-truth pose in {gt_path} -- "
+              "excluded from position/heading/time binding")
 
-    odom_ts = np.array(odom["timestamp_ns"])
-    odom_x, odom_y = np.array(odom["x"]), np.array(odom["y"])
-    odom_yaw = quat_to_yaw(np.array(odom["qx"]), np.array(odom["qy"]),
-                           np.array(odom["qz"]), np.array(odom["qw"]))
-    odom_i = np.array([nearest_index(odom_ts, ts) for ts in rgb_ts])
+    frame_idx = frame_idx_all[has_pose]
+    embeddings_t = embeddings_t[torch.from_numpy(has_pose)]
+    timestamp_ns = timestamp_all[has_pose]
+    pose_rows = np.array([pose_row_by_frame[int(f)] for f in frame_idx])
 
+    x = gt["tx"][pose_rows]
+    y = gt["tz"][pose_rows]  # this dataset's horizontal floor-plane axis (see camera_heading_xz)
+    yaw = camera_heading_xz(gt["qx"][pose_rows], gt["qy"][pose_rows], gt["qz"][pose_rows], gt["qw"][pose_rows])
+    row_idx = np.arange(len(frame_idx))
+
+    order = np.argsort(gt["frame_id"])
     return {
         "embeddings_t": embeddings_t,
         "row_idx": row_idx,
-        "x": odom_x[odom_i], "y": odom_y[odom_i], "yaw": odom_yaw[odom_i],
-        "timestamp_ns": rgb_ts,
-        "dataset_frame_idx": dataset_frame_idx,
-        "n_frames": n_frames,
-        "odom_x": odom_x, "odom_y": odom_y,  # full trajectory, for plotting
+        "x": x, "y": y, "yaw": yaw,
+        "timestamp_ns": timestamp_ns,
+        "dataset_frame_idx": frame_idx,
+        "n_frames": len(frame_idx),
+        "odom_x": gt["tx"][order], "odom_y": gt["tz"][order],  # full ground-truth trajectory, for plotting
     }
 
 
@@ -265,12 +247,6 @@ def load_frame_data(repo: str, d455_rgb_config: str, odom_config: str, embedding
 
 def detect_stationary_trim(x: np.ndarray, y: np.ndarray, anchor_frames: int,
                            distance_threshold: float) -> tuple[int, int]:
-    """(trim_start, trim_end) frame counts: how many frames at the start/end
-    stay within distance_threshold (meters) of the start/end anchor position
-    (median x,y of the first/last anchor_frames samples), i.e. the robot
-    hasn't moved yet/anymore -- these are treated as duplicate stationary
-    frames. Falls back to 0 (no trim) if the robot is never "far" from an
-    anchor (degenerate/no-motion recording) rather than trimming everything."""
     start_anchor = (np.median(x[:anchor_frames]), np.median(y[:anchor_frames]))
     end_anchor = (np.median(x[-anchor_frames:]), np.median(y[-anchor_frames:]))
     far_from_start = np.hypot(x - start_anchor[0], y - start_anchor[1]) > distance_threshold
@@ -281,8 +257,6 @@ def detect_stationary_trim(x: np.ndarray, y: np.ndarray, anchor_frames: int,
 
 
 def select_subset(embeddings: np.ndarray, uncertainty_type: str, quantile: float) -> np.ndarray:
-    """Row indices of the top (1 - quantile) fraction of frames by embedding
-    uncertainty over the raw-embedding cosine self-correlation matrix."""
     corr = cosine_self_correlation(embeddings)
     uncertainty = adjacent_frame_uncertainty(corr) if uncertainty_type == "local" else global_frame_uncertainty(corr)
     threshold = np.quantile(uncertainty, quantile)
@@ -290,16 +264,14 @@ def select_subset(embeddings: np.ndarray, uncertainty_type: str, quantile: float
 
 
 def bundle_memory(content: np.ndarray, context: np.ndarray, subset_idx: np.ndarray) -> np.ndarray:
-    """content, context: (N, hd_dim) complex, aligned by row. Bind each
-    subset row (elementwise complex multiply) then bundle (mean) -> (hd_dim,)."""
     traces = content[subset_idx] * context[subset_idx]
     return traces.mean(axis=0)
 
 
 def cmd_build(args: argparse.Namespace) -> None:
     embeddings_path = Path(args.embeddings) if args.embeddings else with_suffix_for_model(
-        Path("outputs/classroom_detections/embeddings.pt"), args.embedding_model)
-    frames = load_frame_data(args.repo, args.d455_rgb_config, args.odom_config, embeddings_path, args.limit)
+        Path("outputs/freiburg_detections/embeddings.pt"), args.embedding_model)
+    frames = load_frame_data(embeddings_path, args.gt_path, args.limit)
     n_frames = frames["n_frames"]
 
     content_input = frames["embeddings_t"]
@@ -336,9 +308,6 @@ def cmd_build(args: argparse.Namespace) -> None:
     if args.subset == "all":
         subset_idx = valid_range
     elif args.subset == "stride":
-        # Train/val split: every args.stride-th frame is "seen" (bundled into
-        # the memory); the rest are held out, for scripts/classroom's `demo`
-        # command to query with content the memory was never directly given.
         subset_idx = valid_range[::args.stride]
     else:
         raw_embeddings = frames["embeddings_t"].numpy()
@@ -382,7 +351,7 @@ def cmd_build(args: argparse.Namespace) -> None:
     }
 
     out_path = Path(args.out) if args.out else with_suffix_for_model(
-        Path(f"outputs/classroom_detections/associative_memory_{args.subset}.pt"), args.embedding_model)
+        Path(f"outputs/freiburg_detections/associative_memory_{args.subset}.pt"), args.embedding_model)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(result, out_path)
     print(f"memory written to {out_path}")
@@ -393,8 +362,6 @@ def cmd_build(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 def unbind_and_score(memory: np.ndarray, query_context: np.ndarray, codebook_content: np.ndarray) -> np.ndarray:
-    """Unbind memory by query_context, score the residual against every
-    codebook entry -- (len(codebook),) similarities, in codebook order."""
     residual = memory / query_context
     return phasor_cross_correlation(residual[None, :], codebook_content)[0]
 
@@ -447,23 +414,23 @@ def cmd_query(args: argparse.Namespace) -> None:
         best_idx = next(iter(top1_per_axis.values()))
 
     out_path = Path(args.out_path) if args.out_path else with_suffix_for_model(
-        Path("outputs/classroom_detections/query_result.png"), args.embedding_model)
+        Path("outputs/freiburg_detections/query_result.png"), args.embedding_model)
     plot_query_result(args, saved, codebook, det_by_frame, axis_sims, best_idx, out_path)
 
 
 def plot_query_result(args: argparse.Namespace, saved: dict, codebook: dict,
                       det_by_frame: dict, axis_sims: dict, best_idx: int, out_path: Path) -> None:
-    print(f"loading {args.d455_rgb_config} to fetch the recalled frame's image...")
-    rgb = load_dataset(args.repo, args.d455_rgb_config, split="train").sort("timestamp_ns")
-    row = int(codebook["row_idx"][best_idx])
-    image = rgb[row]["image"].convert("RGB")
+    fidx = int(codebook["frame_idx"][best_idx])
+    print(f"loading frame {fidx} from {args.rgb_dir} to fetch the recalled frame's image...")
+    image = load_rgb_image(Path(args.rgb_dir), fidx)
 
-    odom = load_dataset(args.repo, args.odom_config, split="train").sort("timestamp_ns")
-    odom_x, odom_y = np.array(odom["x"]), np.array(odom["y"])
+    gt = load_gt_poses(Path(args.gt_path))
+    order = np.argsort(gt["frame_id"])
+    traj_x, traj_y = gt["tx"][order], gt["tz"][order]
 
     fig, (ax_pos, ax_rgb) = plt.subplots(1, 2, figsize=(14, 6), facecolor=SURFACE, constrained_layout=True)
 
-    ax_pos.plot(odom_x, odom_y, color=BLUE, linewidth=1.5, alpha=0.6, zorder=1, label="trajectory")
+    ax_pos.plot(traj_x, traj_y, color=BLUE, linewidth=1.5, alpha=0.6, zorder=1, label="trajectory")
     rx, ry = float(codebook["x"][best_idx]), float(codebook["y"][best_idx])
     ax_pos.scatter([rx], [ry], color=RED, s=80, zorder=3, label="recalled frame")
     if "position" in axis_sims:
@@ -473,7 +440,7 @@ def plot_query_result(args: argparse.Namespace, saved: dict, codebook: dict,
     ax_pos.set_facecolor(SURFACE)
     ax_pos.set_title("Recalled frame's position", color=INK_PRIMARY, fontsize=12, pad=8)
     ax_pos.set_xlabel("x (m)", color=INK_MUTED, fontsize=9)
-    ax_pos.set_ylabel("y (m)", color=INK_MUTED, fontsize=9)
+    ax_pos.set_ylabel("z (m)", color=INK_MUTED, fontsize=9)
     ax_pos.tick_params(colors=INK_MUTED, labelsize=8)
     for spine in ax_pos.spines.values():
         spine.set_color(GRID)
@@ -484,7 +451,6 @@ def plot_query_result(args: argparse.Namespace, saved: dict, codebook: dict,
 
     ax_rgb.imshow(np.asarray(image))
     ax_rgb.axis("off")
-    fidx = int(codebook["frame_idx"][best_idx])
     ax_rgb.set_title(f"Recalled: frame_idx={fidx}", color=INK_PRIMARY, fontsize=12, pad=8)
     draw_boxes(ax_rgb, [], det_by_frame.get(fidx))
 
@@ -500,22 +466,14 @@ def plot_query_result(args: argparse.Namespace, saved: dict, codebook: dict,
 # ---------------------------------------------------------------------------
 
 def circular_diff(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Signed angular difference a - b, wrapped to [-pi, pi]."""
     return np.arctan2(np.sin(a - b), np.cos(a - b))
 
 
 def l1_l2(errors: np.ndarray) -> tuple[float, float]:
-    """Mean absolute error (L1) and root-mean-square error (L2) of a real,
-    already-in-physical-units error array -- both in the same units, so
-    directly comparable to each other (unlike raw MSE, which would be
-    squared units)."""
     return float(np.mean(np.abs(errors))), float(np.sqrt(np.mean(errors ** 2)))
 
 
 def physical_error(axis: str, codebook: dict, predicted_idx: np.ndarray) -> np.ndarray:
-    """Per-item error between each item's own true context and its top-1
-    recalled item's true context, in physical units: meters (Euclidean) for
-    position, radians (circular-aware) for heading, frames for time."""
     if axis == "position":
         x, y = codebook["x"].numpy(), codebook["y"].numpy()
         return np.hypot(x - x[predicted_idx], y - y[predicted_idx])
@@ -554,22 +512,14 @@ def cmd_evaluate(args: argparse.Namespace) -> None:
                                             ("time", "memory_time", time_codes)):
         memory = saved[memory_key].numpy()
 
-        # Stage: bound vectors -- content_i * context_i, before bundling.
         bound = codebook_content * context_codes
         context_corr = phasor_correlation_matrix(context_codes)
         bound_corr = phasor_correlation_matrix(bound)
-        # Stage: how similar is the final bundled memory to each individual
-        # pre-bundle trace -- high everywhere would mean no crosstalk; a
-        # trace far from the memory's average is one bundling drowned out.
         memory_vs_bound = phasor_cross_correlation(memory[None, :], bound)[0]
         per_axis_stages[axis] = (context_corr, bound_corr, memory_vs_bound)
 
-        # Top-1 recall: unbind by each item's own true context, find the
-        # closest codebook content vector. L1/L2 of that recalled item's
-        # true context vs. the query's own true context, in physical units
-        # -- how far off a miss actually was, not just whether it was one.
         residuals = memory[None, :] / context_codes
-        sims = phasor_cross_correlation(residuals, codebook_content)  # (n, n)
+        sims = phasor_cross_correlation(residuals, codebook_content)
         predicted_idx = np.argmax(sims, axis=1)
         item_errors = physical_error(axis, codebook, predicted_idx)
         l1, l2 = l1_l2(item_errors)
@@ -579,7 +529,7 @@ def cmd_evaluate(args: argparse.Namespace) -> None:
         print(f"[{axis}] L1={l1:.3f}{unit}  L2={l2:.3f}{unit}")
 
     out_path = Path(args.out_path) if args.out_path else with_suffix_for_model(
-        Path("outputs/classroom_detections/evaluate_result.png"), args.embedding_model)
+        Path("outputs/freiburg_detections/evaluate_result.png"), args.embedding_model)
     plot_pipeline_diagnostic(embeddings_corr, per_axis_stages, errors, saved["subset"], out_path)
 
 
@@ -597,14 +547,6 @@ def _plot_corr_cell(ax, corr: np.ndarray, cmap, title: str) -> None:
 
 def plot_pipeline_diagnostic(embeddings_corr: np.ndarray, per_axis_stages: dict,
                              errors: dict, subset: str, out_path: Path) -> Path:
-    """One row per axis (position/heading/time), the pipeline made visible
-    stage by stage: the (whitened or raw) embeddings' own self-correlation,
-    that axis's context self-correlation, the bound (content*context)
-    vectors' self-correlation, how similar the final bundled memory is to
-    each individual pre-bundle trace, and that axis's own L1/L2 top-1
-    physical recall error as the final cell (its units differ per axis, so
-    each row gets its own small panel rather than one shared scale).
-    """
     n = embeddings_corr.shape[0]
     fig = plt.figure(figsize=(21, 5.5 * len(AXES)), facecolor=SURFACE, constrained_layout=True)
     gs = fig.add_gridspec(len(AXES), 5, width_ratios=(1, 1, 1, 1, 0.8))
@@ -657,28 +599,6 @@ def plot_pipeline_diagnostic(embeddings_corr: np.ndarray, per_axis_stages: dict,
 # demo -- "have I seen this before?" over held-out (val) frames
 # ---------------------------------------------------------------------------
 
-def weighted_bundle(predicted: np.ndarray, measurement: np.ndarray, weight: float) -> np.ndarray:
-    """w*predicted + (1-w)*measurement -- a fixed-weight analogue of
-    Phasor.bundle's unweighted mean, letting a temporal prediction (the
-    previous filtered state bound with an odometry delta) dominate or defer
-    to this frame's raw unbind residual by a tunable ratio instead of an
-    equal split. Deliberately not renormalized to unit modulus afterward --
-    phasor_cross_correlation already L2-normalizes each row it compares
-    before scoring, exactly the way Phasor.bundle's own mean is never
-    renormalized either."""
-    return weight * predicted + (1.0 - weight) * measurement
-
-
-def grid_query_similarity(query: np.ndarray, grid_unit: np.ndarray, eps: float = 1e-8) -> np.ndarray:
-    """phasor_cross_correlation, specialized for one query phasor against a grid of
-    candidate codes that's already unit-normalized (see cmd_demo's grid_codes_unit) --
-    normalizing the grid side is the same O(grid_size * hd_dim) work every frame despite
-    the grid never changing across a render, so hoisting it out and only normalizing the
-    (single-vector, effectively free) query here avoids repeating it per frame."""
-    query_unit = query / (np.linalg.norm(query) + eps)
-    return np.real(query_unit[None, :] @ grid_unit.conj().T)[0]
-
-
 def cmd_demo(args: argparse.Namespace) -> None:
     saved = torch.load(args.memory)
     hd_dim, bases = saved["hd_dim"], saved["bases"]
@@ -690,12 +610,9 @@ def cmd_demo(args: argparse.Namespace) -> None:
     print(f"loaded {args.memory}: subset={saved['subset']}, {provenance}, {len(train_row_idx)} train frames")
 
     embeddings_path = Path(args.embeddings) if args.embeddings else with_suffix_for_model(
-        Path("outputs/classroom_detections/embeddings.pt"), args.embedding_model)
-    frames = load_frame_data(args.repo, args.d455_rgb_config, args.odom_config, embeddings_path, None)
+        Path("outputs/freiburg_detections/embeddings.pt"), args.embedding_model)
+    frames = load_frame_data(embeddings_path, args.gt_path, None)
     n_frames = frames["n_frames"]
-    # Same stationary trim the build used (if any), read back as provenance --
-    # otherwise held-out frames would include the build's excluded stationary
-    # prefix/suffix, defeating the point of trimming them.
     trim_start, trim_end = saved.get("trim_start", 0), saved.get("trim_end", 0)
     valid_range = np.arange(trim_start, n_frames - trim_end)
     val_row_idx = np.setdiff1d(valid_range, train_row_idx)
@@ -706,10 +623,6 @@ def cmd_demo(args: argparse.Namespace) -> None:
               f"{trim_end}) from the held-out set too")
     print(f"{len(val_row_idx)} held-out (val) frames to query, out of {n_frames} total")
 
-    # Project every frame's embedding with the SAME W (and PCA whitening, if
-    # used) the memory was built with, so query content lands in the same
-    # space as the codebook -- reusing W directly (not the seed) is what
-    # keeps this the identical projection rather than a fresh random one.
     content_input = frames["embeddings_t"]
     if saved["pca_whiten"]:
         whitened, _ = pca_components(content_input.numpy(), saved["pca_components"])
@@ -724,12 +637,6 @@ def cmd_demo(args: argparse.Namespace) -> None:
     y_range = (float(frames["odom_y"].min() - pad), float(frames["odom_y"].max() + pad))
     grid_x, grid_y, grid_codes = position_grid_codes(x_range, y_range, args.grid_resolution, hd_dim,
                                                       bases["x_seed"], bases["y_seed"], bases["pos_length_scale"])
-    # complex64 (half the bytes of the native complex128 FPE codes) and pre-normalized
-    # once here, rather than every frame -- the grid is identical across the whole
-    # render, so re-normalizing it per frame inside phasor_cross_correlation is pure
-    # O(grid_size * hd_dim) waste (see grid_query_similarity below).
-    grid_codes = grid_codes.astype(np.complex64)
-    grid_codes_unit = grid_codes / (np.linalg.norm(grid_codes, axis=1, keepdims=True) + 1e-8)
     angles, angle_codes = heading_sweep_codes(hd_dim, bases["yaw_seed"], bases["yaw_max_freq"], args.n_angles)
     heat_shape = (args.grid_resolution, args.grid_resolution)
 
@@ -738,9 +645,7 @@ def cmd_demo(args: argparse.Namespace) -> None:
     memory_time = saved["memory_time"].numpy()
 
     det_by_frame = load_detections_by_frame(Path(args.detections))
-
-    print(f"loading {args.d455_rgb_config} for video frames...")
-    rgb = load_dataset(args.repo, args.d455_rgb_config, split="train").sort("timestamp_ns")
+    rgb_dir = Path(args.rgb_dir)
 
     val_ts = frames["timestamp_ns"][val_row_idx]
     if args.fps is None:
@@ -749,7 +654,7 @@ def cmd_demo(args: argparse.Namespace) -> None:
     else:
         fps = args.fps
     out_path = Path(args.out_path) if args.out_path else with_suffix_for_model(
-        Path("outputs/classroom_detections/demo.mp4"), args.embedding_model)
+        Path("outputs/freiburg_detections/demo.mp4"), args.embedding_model)
     print(f"rendering {len(val_row_idx)} held-out frames at {fps:.2f} fps -> {out_path}")
 
     fig = plt.figure(figsize=(20, 6.5), facecolor=SURFACE, constrained_layout=True)
@@ -758,7 +663,8 @@ def cmd_demo(args: argparse.Namespace) -> None:
     ax_heat = fig.add_subplot(gs[0, 1])
     ax_polar = fig.add_subplot(gs[0, 2], projection="polar")
 
-    rgb_im = ax_rgb.imshow(np.asarray(rgb[int(val_row_idx[0])]["image"].convert("RGB")))
+    first_frame_num = int(frames["dataset_frame_idx"][val_row_idx[0]])
+    rgb_im = ax_rgb.imshow(np.asarray(load_rgb_image(rgb_dir, first_frame_num)))
     ax_rgb.axis("off")
     ax_rgb.set_title("current view (held out)", color=INK_PRIMARY, fontsize=11, pad=8)
     box_artists: list = []
@@ -768,13 +674,10 @@ def cmd_demo(args: argparse.Namespace) -> None:
     ax_heat.plot(frames["odom_x"], frames["odom_y"], color=INK_MUTED, linewidth=1, alpha=0.5, zorder=2)
     gt_point = ax_heat.scatter([], [], color=INK_PRIMARY, marker="x", s=90, zorder=4, label="ground truth")
     est_point = ax_heat.scatter([], [], color=RED, marker="o", s=50, zorder=4, label="estimated (peak)")
-    if args.kalman_filter:
-        filtered_point = ax_heat.scatter([], [], color=MAGENTA, marker="^", s=70, zorder=5,
-                                         label="filtered (temporal)")
     ax_heat.set_facecolor(SURFACE)
     ax_heat.set_title("recalled position (similarity heatmap)", color=INK_PRIMARY, fontsize=11, pad=8)
     ax_heat.set_xlabel("x (m)", color=INK_MUTED, fontsize=8)
-    ax_heat.set_ylabel("y (m)", color=INK_MUTED, fontsize=8)
+    ax_heat.set_ylabel("z (m)", color=INK_MUTED, fontsize=8)
     ax_heat.tick_params(colors=INK_MUTED, labelsize=7)
     legend = ax_heat.legend(loc="upper right", fontsize=7, facecolor=SURFACE, edgecolor=GRID)
     for text in legend.get_texts():
@@ -794,45 +697,23 @@ def cmd_demo(args: argparse.Namespace) -> None:
     for text in legend2.get_texts():
         text.set_color(INK_SECONDARY)
 
-    if args.kalman_filter:
-        x_true, prev_row_i = None, None  # carried across rendered held-out frames
-
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    writer = FFMpegWriter(fps=fps, metadata={"title": "associative memory recall demo"})
+    writer = FFMpegWriter(fps=fps, metadata={"title": "Freiburg associative memory recall demo"})
     with writer.saving(fig, str(out_path), dpi=120):
         for i, row_i in enumerate(val_row_idx):
             query_content = content[row_i]
 
-            # -- position: unbind, evaluate similarity over the whole grid --
             residual_pos = memory_position / query_content
-            heat_sims = grid_query_similarity(residual_pos.astype(np.complex64), grid_codes_unit).reshape(heat_shape)
+            heat_sims = phasor_cross_correlation(residual_pos[None, :], grid_codes)[0].reshape(heat_shape)
             heat_im.set_data(heat_sims)
             heat_im.set_clim(float(heat_sims.min()), float(heat_sims.max()))
             peak_row, peak_col = np.unravel_index(np.argmax(heat_sims), heat_shape)
             gt_point.set_offsets([[frames["x"][row_i], frames["y"][row_i]]])
             est_point.set_offsets([[grid_x[peak_col], grid_y[peak_row]]])
 
-            if args.kalman_filter:
-                if x_true is None:
-                    x_true = residual_pos.copy()  # first held-out frame: measurement-only
-                else:
-                    dx = frames["x"][row_i] - frames["x"][prev_row_i]
-                    dy = frames["y"][row_i] - frames["y"][prev_row_i]
-                    delta_code = encode_position(np.array([[dx, dy]]), hd_dim,
-                                                 bases["x_seed"], bases["y_seed"],
-                                                 bases["pos_length_scale"])[0]
-                    predicted = x_true * delta_code
-                    x_true = weighted_bundle(predicted, residual_pos, args.kalman_weight)
-                prev_row_i = row_i
-
-                filtered_sims = grid_query_similarity(x_true.astype(np.complex64), grid_codes_unit).reshape(heat_shape)
-                f_peak_row, f_peak_col = np.unravel_index(np.argmax(filtered_sims), heat_shape)
-                filtered_point.set_offsets([[grid_x[f_peak_col], grid_y[f_peak_row]]])
-
-            # -- heading: unbind, evaluate similarity over the angle sweep --
             residual_heading = memory_heading / query_content
             heading_sims = phasor_cross_correlation(residual_heading[None, :], angle_codes)[0]
-            shifted = heading_sims - heading_sims.min()  # polar plots can't take negative r
+            shifted = heading_sims - heading_sims.min()
             polar_line.set_data(angles, shifted)
             r_max = float(shifted.max()) * 1.05 if shifted.max() > 0 else 1.0
             ax_polar.set_ylim(0, r_max)
@@ -841,7 +722,6 @@ def cmd_demo(args: argparse.Namespace) -> None:
             est_angle = angles[np.argmax(shifted)]
             est_heading_point.set_offsets([[est_angle, shifted.max()]])
 
-            # -- time: unbind, cleanup against the (discrete) train codebook --
             residual_time = memory_time / query_content
             time_sims = phasor_cross_correlation(residual_time[None, :], train_time_codes)[0]
             best_train_i = int(np.argmax(time_sims))
@@ -849,10 +729,9 @@ def cmd_demo(args: argparse.Namespace) -> None:
             recalled_row = int(codebook["row_idx"][best_train_i])
             dt_s = abs(int(frames["timestamp_ns"][row_i]) - int(frames["timestamp_ns"][recalled_row])) / 1e9
 
-            image_row = rgb[int(row_i)]
-            rgb_im.set_data(np.asarray(image_row["image"].convert("RGB")))
-            box_artists = draw_boxes(ax_rgb, box_artists,
-                                     det_by_frame.get(int(frames["dataset_frame_idx"][row_i])))
+            frame_num = int(frames["dataset_frame_idx"][row_i])
+            rgb_im.set_data(np.asarray(load_rgb_image(rgb_dir, frame_num)))
+            box_artists = draw_boxes(ax_rgb, box_artists, det_by_frame.get(frame_num))
 
             fig.suptitle(f"held-out frame {i + 1}/{len(val_row_idx)} (row {row_i})  --  "
                         f"recalled time: ~frame {recalled_frame_idx}, {dt_s:.1f}s away",
@@ -876,9 +755,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     build = sub.add_parser("build", help="bind content to context and bundle into 3 memories")
-    build.add_argument("--repo", default=REPO)
-    build.add_argument("--d455-rgb-config", default="rgb_d455")
-    build.add_argument("--odom-config", default="odometry_lio_sam")
+    build.add_argument("--gt-path", default=GT_PATH)
     build.add_argument("--embedding-model", choices=["yolo", "dino"], default="yolo",
                        help="embedding backend --embeddings was produced with; only changes "
                             "the default --embeddings input path and default --out output path "
@@ -886,14 +763,13 @@ def main() -> None:
                             "memory .pt -- this script is otherwise embedding-dimension-agnostic")
     build.add_argument("--dino-model", default="dinov2_vits14",
                        help="informational only: recorded as provenance in the saved memory "
-                            ".pt when --embedding-model dino (this script never runs DINOv2 "
-                            "itself, it only reads the already-computed embeddings.pt)")
+                            ".pt when --embedding-model dino")
     build.add_argument("--embeddings", default=None,
-                       help="default: outputs/classroom_detections/embeddings.pt, or "
+                       help="default: outputs/freiburg_detections/embeddings.pt, or "
                             "embeddings_dino.pt if --embedding-model dino")
     build.add_argument("--limit", type=int, default=None, help="only use the first N frames")
     build.add_argument("--out", default=None,
-                       help="default: outputs/classroom_detections/associative_memory_<subset>.pt, "
+                       help="default: outputs/freiburg_detections/associative_memory_<subset>.pt, "
                             "or ..._<subset>_dino.pt if --embedding-model dino")
     build.add_argument("--subset", choices=["all", "uncertain", "stride"], default="all",
                        help="'all': bundle every frame. 'uncertain': bundle only the top "
@@ -910,12 +786,10 @@ def main() -> None:
                        help="keep frames at or above this quantile of uncertainty, e.g. 0.8 "
                             "keeps the top 20%% (used only with --subset uncertain)")
     build.add_argument("--trim-stationary", action="store_true",
-                       help="exclude a stationary prefix/suffix (the robot hasn't moved yet, or "
-                            "not anymore) from whichever --subset gets bundled, detected from "
-                            "odometry displacement relative to a start/end anchor position -- "
-                            "these are otherwise near-duplicate frames that waste bundling "
-                            "capacity. Recorded in the saved memory .pt so `demo` reuses the "
-                            "same trim automatically")
+                       help="exclude a stationary prefix/suffix from whichever --subset gets "
+                            "bundled, detected from ground-truth displacement relative to a "
+                            "start/end anchor position. Recorded in the saved memory .pt so "
+                            "`demo` reuses the same trim automatically")
     build.add_argument("--trim-anchor-frames", type=int, default=15,
                        help="number of frames at each end used to compute the stationary anchor "
                             "position (median x,y) -- used only with --trim-stationary")
@@ -925,10 +799,7 @@ def main() -> None:
                             "--trim-stationary")
     build.add_argument("--pca-whiten", action="store_true",
                        help="PCA-whiten the raw embeddings (center, decorrelate, unit-variance "
-                            "per component) before projecting to phasor content -- raw cosine "
-                            "similarity across this dataset sits in a tight 0.70-1.00 band, so "
-                            "whitening aims to spread out the discriminative structure that a "
-                            "single dominant shared direction is currently swamping")
+                            "per component) before projecting to phasor content")
     build.add_argument("--pca-components", type=int, default=None,
                        help="components to keep when --pca-whiten is set; default keeps all "
                             "(full-rank whitening, no dimensionality reduction)")
@@ -948,17 +819,16 @@ def main() -> None:
                        help="only used to pick the default --out-path suffix (_dino); the "
                             "actual backend is read back from --memory's saved provenance and "
                             "printed")
-    query.add_argument("--repo", default=REPO)
-    query.add_argument("--d455-rgb-config", default="rgb_d455")
-    query.add_argument("--odom-config", default="odometry_lio_sam")
-    query.add_argument("--detections", default="outputs/classroom_detections/detections.csv")
+    query.add_argument("--rgb-dir", default=RGB_DIR)
+    query.add_argument("--gt-path", default=GT_PATH)
+    query.add_argument("--detections", default="outputs/freiburg_detections/detections.csv")
     query.add_argument("--query-x", type=float, default=None)
-    query.add_argument("--query-y", type=float, default=None)
+    query.add_argument("--query-y", type=float, default=None, help="ground-truth tz (this dataset's z axis)")
     query.add_argument("--query-yaw", type=float, default=None, help="radians")
-    query.add_argument("--query-time", type=float, default=None, help="row index into the D455 sequence")
+    query.add_argument("--query-time", type=float, default=None, help="row index into the posed frame sequence")
     query.add_argument("--top-k", type=int, default=3)
     query.add_argument("--out-path", default=None,
-                       help="default: outputs/classroom_detections/query_result.png, or "
+                       help="default: outputs/freiburg_detections/query_result.png, or "
                             "..._dino.png if --embedding-model dino")
 
     evaluate = sub.add_parser("evaluate", help="self-recall physical error: query each stored frame's own context")
@@ -968,51 +838,33 @@ def main() -> None:
                                "actual backend is read back from --memory's saved provenance "
                                "and printed")
     evaluate.add_argument("--out-path", default=None,
-                          help="default: outputs/classroom_detections/evaluate_result.png, or "
+                          help="default: outputs/freiburg_detections/evaluate_result.png, or "
                                "..._dino.png if --embedding-model dino")
 
     demo = sub.add_parser("demo", help="video: 'have I seen this before?' over held-out (val) frames")
     demo.add_argument("--memory", required=True,
                       help="path to a .pt written by `build --subset stride` (or any build -- "
                            "held-out frames are just whichever weren't bundled in)")
-    demo.add_argument("--repo", default=REPO)
-    demo.add_argument("--d455-rgb-config", default="rgb_d455")
-    demo.add_argument("--odom-config", default="odometry_lio_sam")
+    demo.add_argument("--rgb-dir", default=RGB_DIR)
+    demo.add_argument("--gt-path", default=GT_PATH)
     demo.add_argument("--embedding-model", choices=["yolo", "dino"], default="yolo",
                       help="embedding backend --embeddings was produced with; only changes the "
                            "default --embeddings input path and default --out-path (adds a "
                            "_dino suffix) -- the memory's own saved provenance is read back "
                            "from --memory and printed for reference")
     demo.add_argument("--embeddings", default=None,
-                      help="default: outputs/classroom_detections/embeddings.pt, or "
+                      help="default: outputs/freiburg_detections/embeddings.pt, or "
                            "embeddings_dino.pt if --embedding-model dino")
-    demo.add_argument("--detections", default="outputs/classroom_detections/detections.csv")
+    demo.add_argument("--detections", default="outputs/freiburg_detections/detections.csv")
     demo.add_argument("--grid-resolution", type=int, default=60,
                       help="position heatmap grid size (grid-resolution x grid-resolution)")
     demo.add_argument("--n-angles", type=int, default=180, help="heading polar plot angle samples")
     demo.add_argument("--fps", type=float, default=None,
                       help="output video frame rate (default: matches the held-out frames' own "
-                           "native capture rate)")
+                           "synthetic capture rate, see detect_and_embed_freiburg.py's --fps)")
     demo.add_argument("--limit", type=int, default=None, help="only render the first N held-out frames")
-    demo.add_argument("--kalman-filter", action="store_true",
-                      help="opt into a per-frame temporal position filter layered on top of the "
-                           "existing per-frame recall: blend the previous held-out frame's "
-                           "filtered state (bound with the ground-truth odometry delta since "
-                           "then -- a 'prediction') against this frame's raw unbind residual (the "
-                           "'measurement') by a fixed weight, see --kalman-weight. Adds one new "
-                           "marker to the position heatmap panel; does not touch the existing "
-                           "ground-truth/estimated markers, the heading panel, time recall, or "
-                           "default behavior when this flag is left off")
-    demo.add_argument("--kalman-weight", type=float, default=0.5,
-                      help="fixed blend weight w in x_true = w*predicted + (1-w)*measurement, "
-                           "applied identically every held-out frame (only used with "
-                           "--kalman-filter). w=0.0 makes the filtered marker reproduce the "
-                           "existing raw per-frame estimate exactly every frame (a good manual "
-                           "sanity check); w=1.0 makes it ignore every measurement after the "
-                           "first held-out frame and just dead-reckon forward from it. Meaningful "
-                           "range is [0, 1]; not enforced")
     demo.add_argument("--out-path", default=None,
-                      help="default: outputs/classroom_detections/demo.mp4, or ..._dino.mp4 if "
+                      help="default: outputs/freiburg_detections/demo.mp4, or ..._dino.mp4 if "
                            "--embedding-model dino")
 
     args = parser.parse_args()

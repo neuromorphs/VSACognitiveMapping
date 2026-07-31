@@ -47,6 +47,14 @@ DIVERGING_CMAP = mcolors.LinearSegmentedColormap.from_list(
     "blue_gray_red", ["#2a78d6", "#f0efec", "#e34948"])
 
 
+def with_suffix_for_model(path: Path, embedding_model: str) -> Path:
+    """Insert a _dino suffix before the extension when embedding_model is
+    'dino', so both backends' default outputs coexist under the same
+    output directory without clobbering each other; 'yolo' leaves the path
+    unchanged (backward compatible with every existing default filename)."""
+    return path if embedding_model == "yolo" else path.with_stem(path.stem + "_dino")
+
+
 def plot_phasor_fidelity(ref_corr: np.ndarray, phasor_corr: np.ndarray, fidelity: float,
                          orthogonality: float, title: str, out_path: Path) -> Path:
     # A shared scale (not a hardcoded [-1, 1]) keeps the two panels directly
@@ -83,19 +91,36 @@ def plot_phasor_fidelity(ref_corr: np.ndarray, phasor_corr: np.ndarray, fidelity
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--embeddings", default="outputs/classroom_detections/embeddings.pt")
-    parser.add_argument("--out-path", default="outputs/classroom_detections/embedding_correlation.png")
+    parser.add_argument("--embedding-model", choices=["yolo", "dino"], default="yolo",
+                        help="embedding backend the input embeddings.pt was produced with -- "
+                             "only changes the default --embeddings/--out-path/--phasor-out-path "
+                             "(adds a _dino suffix); this script is fully embedding-dimension-"
+                             "agnostic and does no backend-specific math")
+    parser.add_argument("--embeddings", default=None,
+                        help="default: outputs/classroom_detections/embeddings.pt, or "
+                             "embeddings_dino.pt if --embedding-model dino")
+    parser.add_argument("--out-path", default=None,
+                        help="default: outputs/classroom_detections/embedding_correlation.png, "
+                             "or ..._dino.png if --embedding-model dino")
     parser.add_argument("--hd-dim", type=int, default=256, help="phasor projection dimensionality")
     parser.add_argument("--phasor-seed", type=int, default=0, help="seed for the random projection matrix")
-    parser.add_argument("--phasor-out-path",
-                        default="outputs/classroom_detections/embedding_phasor_fidelity.png")
+    parser.add_argument("--phasor-out-path", default=None,
+                        help="default: outputs/classroom_detections/embedding_phasor_fidelity.png, "
+                             "or ..._dino.png if --embedding-model dino")
     args = parser.parse_args()
 
-    data = torch.load(args.embeddings)
+    embeddings_path = Path(args.embeddings) if args.embeddings else with_suffix_for_model(
+        Path("outputs/classroom_detections/embeddings.pt"), args.embedding_model)
+    out_path = Path(args.out_path) if args.out_path else with_suffix_for_model(
+        Path("outputs/classroom_detections/embedding_correlation.png"), args.embedding_model)
+    phasor_out_path = Path(args.phasor_out_path) if args.phasor_out_path else with_suffix_for_model(
+        Path("outputs/classroom_detections/embedding_phasor_fidelity.png"), args.embedding_model)
+
+    data = torch.load(embeddings_path)
     embeddings_t = data["embedding"]
     embeddings = embeddings_t.numpy()
     n, dim = embeddings.shape
-    print(f"loaded {n} embeddings of dim {dim} from {args.embeddings}")
+    print(f"loaded {n} embeddings of dim {dim} from {embeddings_path}")
 
     corr = np.corrcoef(embeddings)
     vmin, vmax = corr.min(), corr.max()
@@ -115,7 +140,6 @@ def main() -> None:
     cbar.set_label("Pearson correlation", color=INK_SECONDARY, fontsize=9)
     cbar.ax.tick_params(colors=INK_MUTED, labelsize=8)
 
-    out_path = Path(args.out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=150, facecolor=SURFACE)
     plt.close(fig)
@@ -129,7 +153,6 @@ def main() -> None:
     print(f"[phasor] fidelity={fidelity:.3f} orthogonality={orthogonality:.3f} "
           f"(hd-dim={args.hd_dim}, seed={args.phasor_seed})")
 
-    phasor_out_path = Path(args.phasor_out_path)
     plot_phasor_fidelity(ref_corr, phasor_corr, fidelity, orthogonality,
                          "D455 frame embedding: raw vs. phasor-projected", phasor_out_path)
     print(f"phasor fidelity heatmap written to {phasor_out_path}")

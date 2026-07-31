@@ -78,6 +78,14 @@ def global_frame_uncertainty(corr: np.ndarray) -> np.ndarray:
     return 1.0 - row_sum / (n - 1)
 
 
+def with_suffix_for_model(path: Path, embedding_model: str) -> Path:
+    """Insert a _dino suffix before the extension when embedding_model is
+    'dino', so both backends' default outputs coexist under the same
+    output directory without clobbering each other; 'yolo' leaves the path
+    unchanged (backward compatible with every existing default filename)."""
+    return path if embedding_model == "yolo" else path.with_stem(path.stem + "_dino")
+
+
 def top_k_peaks(signal: np.ndarray, k: int, min_distance: int) -> list[int]:
     """Indices of the k largest values in signal, greedily picked highest
     first and skipping any candidate within min_distance frames of an
@@ -194,10 +202,21 @@ def analyze_and_plot(corr: np.ndarray, frame_idx: np.ndarray, out_path: Path, ta
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--embeddings", default="outputs/classroom_detections/embeddings.pt")
-    parser.add_argument("--out-path", default="outputs/classroom_detections/embedding_uncertainty.png")
-    parser.add_argument("--phasor-out-path",
-                        default="outputs/classroom_detections/embedding_uncertainty_phasor.png")
+    parser.add_argument("--embedding-model", choices=["yolo", "dino"], default="yolo",
+                        help="embedding backend the input embeddings.pt was produced with -- "
+                             "only changes the default --embeddings/--out-path/--phasor-out-path "
+                             "(adds a _dino suffix); this script is fully embedding-dimension-"
+                             "agnostic and does no backend-specific math")
+    parser.add_argument("--embeddings", default=None,
+                        help="default: outputs/classroom_detections/embeddings.pt, or "
+                             "embeddings_dino.pt if --embedding-model dino")
+    parser.add_argument("--out-path", default=None,
+                        help="default: outputs/classroom_detections/embedding_uncertainty.png, "
+                             "or ..._dino.png if --embedding-model dino")
+    parser.add_argument("--phasor-out-path", default=None,
+                        help="default: outputs/classroom_detections/"
+                             "embedding_uncertainty_phasor.png, or ..._dino.png if "
+                             "--embedding-model dino")
     parser.add_argument("--hd-dim", type=int, default=256, help="phasor projection dimensionality")
     parser.add_argument("--phasor-seed", type=int, default=0, help="seed for the random projection matrix")
     parser.add_argument("--top-k", type=int, default=2, help="number of major transitions to flag per signal")
@@ -206,16 +225,23 @@ def main() -> None:
                              "change spanning a few frames isn't counted twice")
     args = parser.parse_args()
 
-    data = torch.load(args.embeddings)
+    embeddings_path = Path(args.embeddings) if args.embeddings else with_suffix_for_model(
+        Path("outputs/classroom_detections/embeddings.pt"), args.embedding_model)
+    out_path = Path(args.out_path) if args.out_path else with_suffix_for_model(
+        Path("outputs/classroom_detections/embedding_uncertainty.png"), args.embedding_model)
+    phasor_out_path = Path(args.phasor_out_path) if args.phasor_out_path else with_suffix_for_model(
+        Path("outputs/classroom_detections/embedding_uncertainty_phasor.png"), args.embedding_model)
+
+    data = torch.load(embeddings_path)
     embeddings_t = data["embedding"]
     embeddings = embeddings_t.numpy()
     n, dim = embeddings.shape
-    print(f"loaded {n} embeddings of dim {dim} from {args.embeddings}")
+    print(f"loaded {n} embeddings of dim {dim} from {embeddings_path}")
 
     frame_idx = data["frame_idx"].numpy()
 
     corr = cosine_self_correlation(embeddings)
-    analyze_and_plot(corr, frame_idx, Path(args.out_path), "",
+    analyze_and_plot(corr, frame_idx, out_path, "",
                      matrix_title="D455 frame embedding self-correlation (cosine)",
                      matrix_label="cosine similarity",
                      suptitle="Embedding uncertainty -- per-frame (bottom) vs. global (right)",
@@ -223,7 +249,7 @@ def main() -> None:
 
     phasor_z, _W = random_project_to_phasor(embeddings_t, d=args.hd_dim, seed=args.phasor_seed)
     phasor_corr = phasor_correlation_matrix(phasor_z.numpy())
-    analyze_and_plot(phasor_corr, frame_idx, Path(args.phasor_out_path), "[phasor] ",
+    analyze_and_plot(phasor_corr, frame_idx, phasor_out_path, "[phasor] ",
                      matrix_title="D455 frame embedding self-correlation (phasor-projected, HD)",
                      matrix_label="phasor similarity",
                      suptitle="Phasor uncertainty -- per-frame (bottom) vs. global (right) "
