@@ -165,6 +165,41 @@ footer{border-top:1px solid var(--line);margin-top:46px;padding:26px 0 60px;colo
 
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 
+/* ---- "how it actually works": live widgets ---- */
+.hw-h{margin:34px 0 2px;font-size:1.06rem;font-weight:680;letter-spacing:-.008em;text-transform:none;color:var(--ink)}
+.hw-h .n{color:var(--accent)}
+.cv-dial{aspect-ratio:1/1}
+.cv-wide{aspect-ratio:16/6}
+.cv-strip{aspect-ratio:16/5}
+.hw-out{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+        font-size:.8rem;line-height:1.65;background:var(--panel);border:1px solid var(--line);
+        border-radius:9px;padding:10px 12px;margin:12px 0 0;overflow-x:auto;color:var(--ink2)}
+.hw-out b{color:var(--ink);font-weight:650}
+.hw-out .ok{color:var(--good);font-weight:650}
+.hw-out .no{color:var(--bad);font-weight:650}
+.hw-lab{font-size:.84rem;color:var(--muted);flex:0 0 auto}
+.hw-lab .num{color:var(--ink);font-weight:650;display:inline-block;min-width:6.5ch}
+.hw-eq{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+       font-size:.83rem;line-height:1.7;background:var(--panel);border-left:3px solid var(--line2);
+       border-radius:0 8px 8px 0;padding:9px 13px;margin:12px 0;overflow-x:auto;
+       color:var(--ink);white-space:pre;max-width:96ch}
+details.deep{border:1px solid var(--line);border-radius:11px;background:var(--card);margin:14px 0 0;max-width:96ch}
+details.deep>summary{cursor:pointer;padding:10px 14px;font-size:.87rem;font-weight:650;color:var(--ink2);list-style:none}
+details.deep>summary::-webkit-details-marker{display:none}
+details.deep>summary::before{content:"\25B8\00A0";color:var(--accent)}
+details.deep[open]>summary::before{content:"\25BE\00A0"}
+details.deep>summary:hover{color:var(--ink)}
+details.deep .body{padding:12px 14px 4px;font-size:.9rem;color:var(--ink2);border-top:1px solid var(--line)}
+details.deep .body p{margin:0 0 .9em}
+.hw-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin:14px 0 0}
+.hw-step{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:11px 12px}
+.hw-step .n{font-size:.67rem;letter-spacing:.13em;text-transform:uppercase;color:var(--accent);font-weight:700}
+.hw-step .t{font-size:.9rem;font-weight:650;margin:2px 0 4px;color:var(--ink);line-height:1.3}
+.hw-step .d{font-size:.79rem;color:var(--ink2);line-height:1.45}
+.hw-step .s{display:inline-block;margin-top:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+            font-size:.71rem;background:var(--accent-soft);color:var(--accent);border-radius:6px;padding:2px 7px}
+.hw-step.term{border-color:var(--accent)}
+
 </style>
 </head>
 <body>
@@ -174,6 +209,7 @@ footer{border-top:1px solid var(--line);margin-top:46px;padding:26px 0 60px;colo
       <span class="kicker">ASTM &middot; a VSA cognitive map for Spot</span>
       <nav class="jump" aria-label="Sections">
         <a href="#replay">Replay</a>
+        <a href="#how">How it works</a>
         <a href="#lang">English</a>
         <a href="#time">Time</a>
         <a href="#merge">Merge</a>
@@ -278,10 +314,335 @@ footer{border-top:1px solid var(--line);margin-top:46px;padding:26px 0 60px;colo
   </div>
 </section>
 
-<!-- ============ 3. LANGUAGE ============ -->
+<!-- ============ 3. HOW IT ACTUALLY WORKS ============ -->
+<section id="how">
+  <div class="wrap">
+    <p class="eyebrow">2 &middot; Under the hood</p>
+    <h2>How it actually works</h2>
+    <p class="prose">
+      You have just watched it work. Here is the whole mechanism, with no metaphors: a place, a
+      heading and a moment are each turned into a list of <em>angles</em>, one angle per dimension,
+      and the only things ever done to them are <b>add the angles</b>, <b>average the vectors</b> and
+      <b>subtract the angles</b>. The four widgets below are not illustrations &mdash; they run the real
+      construction, live, as you move the controls.
+    </p>
+    <p class="cap" style="border-left-color:var(--warn);max-width:96ch">
+      <b>Read this first.</b> The widgets in this section build their vectors at
+      <b>D&nbsp;=&nbsp;1024</b> dimensions with their own random draw, so that the kernel shape and the
+      interference between stored items are big enough to see on a screen. The exported memory
+      everywhere else on this page is <b>D&nbsp;=&nbsp;8192</b> with a different draw. Same formulas,
+      same code path &mdash; only the dimensionality and the seed differ, and every number printed
+      below is computed in your browser as you read it, not baked in.
+    </p>
+
+    <!-- ---------- W1: POSITION ---------- -->
+    <h3 class="hw-h" id="how-pos"><span class="n">1</span> &middot; Position: every dimension is a clock</h3>
+    <p class="prose">
+      Position uses <em>fractional power encoding</em>. Two base vectors <code>Bx</code> and
+      <code>By</code> are drawn once: each of their dimensions gets a random phase from
+      <code>Uniform(0,&nbsp;2&pi;)</code>, and the stored value is <code>exp(i&middot;phase)</code> &mdash; a point
+      on the unit circle. Raising such a vector to a fractional power just <em>multiplies its
+      phase</em>, so encoding a place is one line:
+    </p>
+    <div class="hw-eq">ctx_pos(x, y) = (Bx ** (x / l)) * (By ** (y / l))        l = pos_length_scale = 0.75 m
+
+S(x, y)[m] = exp( i * ( phi_x[m] * x/l  +  phi_y[m] * y/l ) )</div>
+    <p class="prose">
+      Every one of the 8192 dimensions is a little clock, and each clock's hand turns at its
+      <em>own</em> fixed rate as you move in x and in y. No single number holds the position: it is
+      held in the <em>pattern of phases across dimensions</em>. Drag the sliders and watch the
+      pattern change smoothly.
+    </p>
+
+    <div class="card">
+      <div class="two">
+        <div class="pane">
+          <h3>64 of the 1024 clocks</h3>
+          <canvas id="cvW1Dial" class="cv-dial" role="img"
+                  aria-label="An eight by eight grid of clock dials, one per vector dimension. Each hand points at that dimension's phase for the chosen position, and each dial is shaded by the cosine of that phase."></canvas>
+          <p class="note" style="margin:8px 0 0">
+            Hand = that dimension's phase. Shade = <code>cos(phase)</code>, which is exactly that
+            dimension's contribution to the similarity with the room origin <code>S(0,&nbsp;0)</code>.
+            Average that over all 1024 dimensions (only 64 are drawn) and you have the number
+            printed below.
+          </p>
+        </div>
+        <div class="pane">
+          <h3>Similarity to &ldquo;here&rdquo;, across the room</h3>
+          <canvas id="cvW1Field" class="cv-map" role="img"
+                  aria-label="Heat map of the similarity between the position code at the chosen point and the position code at every other point in the room: a single bright blob centred on the chosen point."></canvas>
+          <div class="legend">
+            <span><i style="background:var(--c-peak)"></i>the point you chose</span>
+            <span><i style="background:var(--c-truth)"></i>room origin (0, 0)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="ctrl">
+        <span class="hw-lab"><label for="w1x">x</label> <span class="num" id="w1xv">&nbsp;</span></span>
+        <input id="w1x" type="range" value="0" aria-label="x position in metres">
+        <span class="hw-lab"><label for="w1y">y</label> <span class="num" id="w1yv">&nbsp;</span></span>
+        <input id="w1y" type="range" value="0" aria-label="y position in metres">
+      </div>
+
+      <div class="pane" style="margin-top:18px">
+        <h3>A straight-line slice through that blob</h3>
+        <canvas id="cvW1Slice" class="cv-wide" role="img"
+                aria-label="Line chart of similarity against displacement in metres, showing a sinc-like bump centred on zero whose half width is the 0.75 metre length scale, for slices taken along x and along y."></canvas>
+        <div class="legend">
+          <span><i style="background:var(--c-exact)"></i>slice along x</span>
+          <span><i style="background:var(--c-class)"></i>slice along y</span>
+          <span><i style="background:var(--accent)"></i>dashed: your point&rsquo;s similarity to the origin</span>
+        </div>
+      </div>
+      <div class="hw-out" id="w1out">&nbsp;</div>
+    </div>
+
+    <p class="cap">
+      <b>What to notice.</b> The blob follows you, but its <em>shape</em> never changes &mdash; the
+      similarity between two places depends only on the displacement between them, never on where
+      in the room they are. That translation-invariance is the homomorphism, drawn; and the width of
+      the bump is the length scale <code>l&nbsp;=&nbsp;0.75&nbsp;m</code>, which is the resolution dial for
+      the whole map.
+    </p>
+
+    <details class="deep">
+      <summary>The two consequences, written out</summary>
+      <div class="body">
+        <p><b>(a) It is a homomorphism, so displacement is native.</b> Phases add under binding, and
+          binding is an elementwise complex multiply, so
+          <code>S(a)&nbsp;&otimes;&nbsp;S(b)&nbsp;=&nbsp;S(a+b)</code> <em>exactly</em> &mdash; the readout above
+          measures the largest per-dimension disagreement and finds only floating-point rounding,
+          which shrinks to a single unit in the last place of a double once the phases involved are small.
+          Run it backwards and you get the useful one:
+          <code>S(target)&nbsp;&#8856;&nbsp;S(anchor)&nbsp;=&nbsp;S(target&nbsp;&minus;&nbsp;anchor)</code>. A
+          relative displacement is not a special case that had to be built &mdash; it falls out of the
+          encoding.</p>
+        <p><b>(b) The similarity kernel is a bump of width <code>l</code>.</b>
+          <code>sim(S(0),&nbsp;S(d))&nbsp;=&nbsp;(1/D)&nbsp;&sum;<sub>m</sub>&nbsp;cos(phi<sub>m</sub>&nbsp;&middot;&nbsp;d/l)</code>.
+          With phases drawn uniformly this is a sinc-like bump: nearby places are similar, distant
+          places are near-orthogonal. That kernel is the reason every heat map on this page is a
+          <em>blob</em> rather than a single lit pixel, and it is why a coarse decoding grid can
+          still be read out sensibly. Shrink <code>l</code> and the bump narrows: more resolution,
+          less tolerance to error, and more stored items needed to cover the same room.</p>
+      </div>
+    </details>
+
+    <!-- ---------- W2: HEADING ---------- -->
+    <h3 class="hw-h" id="how-head"><span class="n">2</span> &middot; Heading: a circular base, <em>not</em> a ring attractor</h3>
+    <p class="prose">
+      This one is worth stating plainly, because it is easy to assume otherwise:
+      <b>there is no ring attractor network and no continuous attractor network anywhere in this
+      implementation.</b> Heading uses the same fractional power encoding as position, with one
+      change to the base vector. In <code>circular_base</code>, each dimension is given a random
+      <em>integer</em> frequency <code>k</code> drawn from <code>{&minus;3,&minus;2,&minus;1,1,2,3}</code>,
+      and the base stores <code>exp(i&middot;k)</code>:
+    </p>
+    <div class="hw-eq">ctx_head(psi) = Bhead ** psi      Bhead[m] = exp(i * k[m]),  k[m] integer, 1 &lt;= |k[m]| &lt;= 3
+
+  (Bhead ** psi)[m] = exp( i * k[m] * psi )     =&gt;   ctx_head(psi + 2*pi) == ctx_head(psi)</div>
+    <p class="prose">
+      Because every <code>k</code> is a whole number, a full turn returns the vector to
+      <em>exactly</em> where it started. An ordinary uniform-phase base does not do that &mdash; turn
+      all the way round with one of those and you arrive at a stranger. Flip the toggle to see the
+      difference.
+    </p>
+
+    <div class="card">
+      <div class="two">
+        <div class="pane">
+          <h3>Similarity to heading 0, one full turn</h3>
+          <canvas id="cvW2Polar" class="cv-polar" role="img"
+                  aria-label="Polar plot of the similarity between the heading code at zero and the heading code at every angle over one full turn, showing a multi-lobed shape rather than a single peak."></canvas>
+          <div class="legend">
+            <span><i style="background:var(--c-peak)"></i>the heading you chose</span>
+            <span><i style="background:var(--c-exact)"></i>ordinary base (when shown)</span>
+          </div>
+        </div>
+        <div class="pane">
+          <h3>The same curve, unrolled over two turns</h3>
+          <canvas id="cvW2Line" class="cv-wide" role="img" style="aspect-ratio:16/10"
+                  aria-label="Line chart of heading similarity against angle from minus two pi to plus two pi. The circular base curve is identical at minus two pi, zero and plus two pi; the ordinary base curve peaks only at zero."></canvas>
+          <div class="legend">
+            <span><i style="background:var(--accent)"></i>circular base (what the code uses)</span>
+            <span><i style="background:var(--c-exact)"></i>ordinary uniform-phase base</span>
+          </div>
+        </div>
+      </div>
+      <div class="ctrl">
+        <span class="hw-lab"><label for="w2p">heading &psi;</label> <span class="num" id="w2pv">&nbsp;</span></span>
+        <input id="w2p" type="range" value="0" aria-label="Heading angle psi in radians">
+        <button id="w2toggle" class="btn" type="button" aria-pressed="false">Show ordinary (non-circular) base</button>
+      </div>
+      <div class="hw-out" id="w2out">&nbsp;</div>
+    </div>
+
+    <p class="cap">
+      <b>What to notice.</b> Two things at once. The curve has <em>several</em> lobes, not one clean
+      peak &mdash; that is the whole explanation for the lumpy petal shape in the heading panel of the
+      replay above. And the circular curve is identical to floating-point precision at &minus;2&pi;,
+      0 and +2&pi;, while the ordinary base's is not: turn a full circle with an ordinary base and
+      the memory thinks you are somewhere new.
+    </p>
+
+    <details class="deep">
+      <summary>Why <code>|k| &le; 3</code>, and why the shape is lumpy</summary>
+      <div class="body">
+        <p><b>Why 3.</b> <code>Bhead ** psi</code> is a complex power, evaluated on the principal
+          branch: it computes <code>exp(psi &middot; log(Bhead))</code>, and <code>log</code> returns an
+          imaginary part in <code>(&minus;&pi;,&nbsp;&pi;]</code>. The integer frequency <code>k</code>
+          only survives that round trip while <code>|k|&nbsp;&lt;&nbsp;&pi;</code>. Three is the largest
+          integer that fits, which is why <code>max_freq</code> is 3 and not, say, 12.</p>
+        <p><b>Why the lobes.</b> The kernel is
+          <code>(1/D)&nbsp;&sum;<sub>m</sub>&nbsp;cos(k<sub>m</sub>&nbsp;&middot;&nbsp;&Delta;&psi;)</code>, and with
+          only three magnitudes available it is a sum of harmonics 1, 2 and 3 &mdash; in expectation
+          <code>(cos&nbsp;&Delta;&psi; + cos&nbsp;2&Delta;&psi; + cos&nbsp;3&Delta;&psi;)&nbsp;/&nbsp;3</code>. That is a
+          truncated Dirichlet-style kernel: a main peak at zero, a trough below zero near &pi;, and
+          side structure in between. A position code, whose phases come from a continuum, has no
+          such ceiling and gets a much cleaner single bump. Exact periodicity is bought with
+          angular sharpness, and the polar panel in the replay is that trade-off on screen.</p>
+        <p><b>On ring attractors, said carefully.</b> Ring and continuous attractor networks
+          <em>are</em> the standard neuromorphic way to hold a heading, and they are used in the
+          GC-VSA line of work (Krausse, Neftci, Sommer &amp; Renner, NICE 2025), which combines
+          continuous attractor networks with VSA. The representation here is from the same family;
+          the difference is that this code computes the vector directly rather than letting a
+          network settle into it, and a continuous attractor network is the natural hardware
+          implementation route for exactly this algebra. But nothing on this page runs one, and no
+          result here should be read as evidence about one.</p>
+      </div>
+    </details>
+
+    <!-- ---------- W3: THE THREE OPERATIONS ---------- -->
+    <h3 class="hw-h" id="how-ops"><span class="n">3</span> &middot; Bind, bundle, unbind &mdash; and what it costs</h3>
+    <p class="prose">
+      Three operations, and that is the entire vocabulary.
+      <b>Bind</b> is an elementwise complex multiply, i.e. add the phases: it is invertible and it
+      <em>destroys</em> similarity, so a bound pair looks like nothing in particular &mdash; which is what
+      makes it usable as a key. <b>Bundle</b> is the elementwise mean: it superposes, keeps the result
+      the same size no matter how many things go in, and <em>preserves</em> similarity to each
+      ingredient &mdash; at the price of accumulating interference. <b>Unbind</b> is an elementwise
+      divide, i.e. subtract the phases.
+    </p>
+    <div class="hw-eq">bind(a, b)[m]   = a[m] * b[m]         phases add        (invertible, destroys similarity)
+bundle(v)[m]    = mean_i v_i[m]       superposition     (D wide however many go in)
+unbind(a, b)[m] = a[m] / b[m]         phases subtract   (the inverse of bind)</div>
+    <p class="prose">
+      Below, <code>k</code> object atoms are each bound to a place code and bundled into one trace;
+      then the trace is unbound by <em>one</em> of those atoms and the residual is compared against
+      all 40 place codes. Slide <code>k</code> and watch the margin close.
+    </p>
+
+    <div class="card">
+      <div class="pane">
+        <h3>Similarity of the residual to each of the 40 place codes</h3>
+        <canvas id="cvW3Bars" class="cv-strip" role="img"
+                aria-label="Bar chart of the similarity between the unbound residual and each of forty place codes. The bar for the correct place code stands well above the rest, which form a low crosstalk floor."></canvas>
+        <div class="legend">
+          <span><i style="background:var(--c-peak)"></i>the place we asked for</span>
+          <span><i style="background:#9aa4b2"></i>the other 39 (crosstalk)</span>
+        </div>
+      </div>
+      <div class="pane" style="margin-top:18px">
+        <h3>Margin (signal &divide; crosstalk) as more items are stored</h3>
+        <canvas id="cvW3Chart" class="cv-wide" role="img"
+                aria-label="Line chart of the signal to crosstalk margin against the number of bundled items, falling roughly as one over the square root of k, with the square root of two D over k prediction drawn on top."></canvas>
+        <div class="legend">
+          <span><i style="background:var(--accent)"></i>measured margin</span>
+          <span><i style="background:#9aa4b2"></i>dashed: &radic;(2D&thinsp;/&thinsp;k), the prediction</span>
+        </div>
+      </div>
+      <div class="ctrl">
+        <span class="hw-lab"><label for="w3k">items bundled, k</label> <span class="num" id="w3kv">&nbsp;</span></span>
+        <input id="w3k" type="range" min="1" max="40" step="1" value="8" aria-label="Number of items bundled into the trace">
+      </div>
+      <div class="ctrl" style="margin-top:8px">
+        <span class="hw-lab">dimensions D</span>
+        <span class="chips" id="w3dims" role="group" aria-label="Vector dimensionality" style="margin:0"></span>
+      </div>
+      <div class="hw-out" id="w3out">&nbsp;</div>
+    </div>
+
+    <p class="cap">
+      <b>What to notice.</b> Both numbers shrink as <code>k</code> grows, because bundling is a
+      <em>mean</em> &mdash; but they shrink at different rates: the signal falls like <code>1/k</code>
+      while the crosstalk falls only like <code>1/&radic;(kD)</code>, so the margin between them
+      closes like <code>&radic;(2D/k)</code>. Leave D at 1024 and the right answer still wins at
+      k&nbsp;=&nbsp;40, but only by 2.1&times; over the loudest competitor rather than 20&times;. Drop D to 64,
+      push k to 40, and it stops being the top match at all. That one curve is the capacity of the entire scheme, and it is why this page
+      keeps quoting <code>z</code> scores rather than raw similarities.
+    </p>
+
+    <!-- ---------- W4: LANGUAGE ---------- -->
+    <h3 class="hw-h" id="how-lang"><span class="n">4</span> &middot; How an English sentence becomes a key</h3>
+    <p class="prose">
+      The language section below is the same algebra with one extra front-end. Nothing is decoded
+      into text and no language model reads the map; the sentence is simply projected into the very
+      same phasor space the map was written in, and then divided out. Five steps, all fixed once the
+      vocabulary has been embedded:
+    </p>
+
+    <div class="hw-flow">
+      <div class="hw-step">
+        <div class="n">step 1</div>
+        <div class="t">Sentence &rarr; embedding</div>
+        <div class="d"><code>all-MiniLM-L6-v2</code> maps the phrase to one dense vector.</div>
+        <div class="s">384-d real</div>
+      </div>
+      <div class="hw-step">
+        <div class="n">step 2</div>
+        <div class="t">Whiten by PCA</div>
+        <div class="d">PCA fitted over the vocabulary &mdash; the 38 detected class names plus about
+          180 common object nouns &mdash; keeping up to 128 components, each rescaled to unit variance.</div>
+        <div class="s">&le;128-d, isotropic</div>
+      </div>
+      <div class="hw-step">
+        <div class="n">step 3</div>
+        <div class="t">Fixed random projection</div>
+        <div class="d">One Gaussian matrix <code>W&nbsp;~&nbsp;N(0,&nbsp;1/d<sub>in</sub>)</code>, drawn once,
+          of shape <code>(d<sub>in</sub>,&nbsp;2D)</code>, giving an (I,&nbsp;Q) pair per dimension.</div>
+        <div class="s">2D = 16384 reals</div>
+      </div>
+      <div class="hw-step">
+        <div class="n">step 4</div>
+        <div class="t">Throw the magnitude away</div>
+        <div class="d">Each (I,&nbsp;Q) pair is normalised onto the unit circle. Only the angle
+          survives &mdash; an ordinary phasor, indistinguishable in type from a place code.</div>
+        <div class="s">D = 8192 phasor</div>
+      </div>
+      <div class="hw-step term">
+        <div class="n">step 5</div>
+        <div class="t">Divide, then correlate</div>
+        <div class="d">The memory is unbound by that phasor and the residual is correlated against
+          the position grid. Pure algebra from here on.</div>
+        <div class="s">M &#8856; &phi;(text)</div>
+      </div>
+    </div>
+
+    <p class="prose" style="margin-top:18px">
+      The step that makes this work is the one easiest to skip over. <b>The memory's class atoms
+      were built with the same encoder, the same whitening and the same <code>W</code>, from the
+      class <em>names</em>.</b> A phrase the map has never seen therefore lands near the atoms of
+      semantically similar class names, in the same space, and unbinding just works. The whitening
+      is not cosmetic either: raw sentence embeddings are strongly anisotropic, and without
+      isotropising them first the projected phasors are too mutually similar to unbind cleanly.
+    </p>
+    <p class="prose">
+      This also explains the shape of the failures. Over the <b>11 phrases</b> on this page the
+      median position error is <b>0.19&nbsp;m</b>, and the two that miss &mdash;
+      <b>&ldquo;something to sit on&rdquo;</b> (6.93&nbsp;m out, landing on the couch) and
+      <b>&ldquo;a computer display&rdquo;</b> (5.93&nbsp;m out, landing on the laptop) &mdash; miss
+      <em>semantically</em>, not mechanically: the embedding genuinely ranked a different but
+      plausible object first, and the memory answered the question it was actually asked. There is
+      no live language model in this page &mdash; step 1 was run offline and its results inlined, which
+      is why this panel is a diagram rather than a text box.
+    </p>
+  </div>
+</section>
+
+<!-- ============ 4. LANGUAGE ============ -->
 <section id="lang">
   <div class="wrap">
-    <p class="eyebrow">2 &middot; Ask it in English</p>
+    <p class="eyebrow">3 &middot; Ask it in English</p>
     <h2>A sentence you never taught it, used directly as the key</h2>
     <p class="prose">
       The map stores object <em>classes</em> from a detector &mdash; chair, tv, suitcase. It has never
@@ -313,6 +674,31 @@ footer{border-top:1px solid var(--line);margin-top:46px;padding:26px 0 60px;colo
       </div>
     </div>
 
+    <details class="deep">
+      <summary>How the sentence actually gets in (and what that does <em>not</em> mean)</summary>
+      <div class="body">
+        <p>Five fixed steps, no lookup and no retraining.
+          <b>(1)</b> <code>all-MiniLM-L6-v2</code> embeds the phrase into 384 real dimensions.
+          <b>(2)</b> That embedding is whitened by a PCA fitted over the vocabulary &mdash; the 38
+          detected class names plus about 180 common object nouns &mdash; keeping up to 128
+          unit-variance components. <b>(3)</b> A single fixed Gaussian matrix
+          <code>W&nbsp;~&nbsp;N(0,&nbsp;1/d<sub>in</sub>)</code> of shape
+          <code>(d<sub>in</sub>,&nbsp;2D)</code> turns it into (I,&nbsp;Q) pairs. <b>(4)</b> Each pair is
+          normalised onto the unit circle and its magnitude discarded, leaving an ordinary
+          unit-modulus phasor of dimension 8192. <b>(5)</b> The memory is unbound by that phasor and
+          the residual correlated against the position grid.</p>
+        <p>The step that makes it work: <b>the memory's class atoms were built with the same
+          encoder, the same whitening and the same <code>W</code>, from the class names.</b> So a
+          novel phrase lands near the atoms of semantically similar class names, in the same phasor
+          space the map is written in.</p>
+        <p>What this is <em>not</em>: the language model never reads the map, and nothing is decoded
+          back into text. The sentence is projected into the map's own space and then it is just
+          algebra &mdash; which is also why the failures on this page are semantic (the phrase genuinely
+          matched a different object) rather than mechanical.
+          <a href="#how-lang">See the annotated pipeline &uarr;</a></p>
+      </div>
+    </details>
+
     <p class="cap">
       <b>What you are looking at.</b> The heat map is the memory's answer to a question posed in
       free-text English, with the sentence vector itself acting as the algebraic key &mdash; the phrases
@@ -326,10 +712,10 @@ footer{border-top:1px solid var(--line);margin-top:46px;padding:26px 0 60px;colo
   </div>
 </section>
 
-<!-- ============ 4. TIME ============ -->
+<!-- ============ 5. TIME ============ -->
 <section id="time">
   <div class="wrap">
-    <p class="eyebrow">3 &middot; Ask it about time</p>
+    <p class="eyebrow">4 &middot; Ask it about time</p>
     <h2>Where was it then, and when was it there</h2>
     <p class="prose">
       Time is bound in as a third factor, so the same four vectors answer questions in both
@@ -407,10 +793,10 @@ footer{border-top:1px solid var(--line);margin-top:46px;padding:26px 0 60px;colo
   </div>
 </section>
 
-<!-- ============ 5. MERGE ============ -->
+<!-- ============ 6. MERGE ============ -->
 <section id="merge">
   <div class="wrap">
-    <p class="eyebrow">4 &middot; Two robots, one memory</p>
+    <p class="eyebrow">5 &middot; Two robots, one memory</p>
     <h2>Merging two maps is addition</h2>
     <div class="two" style="align-items:start">
       <figure>
@@ -446,10 +832,10 @@ footer{border-top:1px solid var(--line);margin-top:46px;padding:26px 0 60px;colo
   </div>
 </section>
 
-<!-- ============ 6. LIMITS ============ -->
+<!-- ============ 7. LIMITS ============ -->
 <section id="limits">
   <div class="wrap">
-    <p class="eyebrow">5 &middot; Honest limits</p>
+    <p class="eyebrow">6 &middot; Honest limits</p>
     <h2>What this page does not show</h2>
     <ul class="limits">
       <li><b>One room, one walk.</b><span> Every number here comes from a single classroom sequence.
@@ -731,6 +1117,13 @@ var XTALK_PNG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABxwAAALYCAYAAABG0Ie
     var ymin = Infinity, ymax = -Infinity;
     for (i = 0; i < ys.length; i++) { if (ys[i] < ymin) ymin = ys[i]; if (ys[i] > ymax) ymax = ys[i]; }
     if (o.mark) { if (o.mark[1] < ymin) ymin = o.mark[1]; if (o.mark[1] > ymax) ymax = o.mark[1]; }
+    (o.series || []).forEach(function (sr) {
+      for (var q = 0; q < sr.y.length; q++) {
+        if (sr.y[q] < ymin) ymin = sr.y[q];
+        if (sr.y[q] > ymax) ymax = sr.y[q];
+      }
+    });
+    if (o.hline != null) { if (o.hline < ymin) ymin = o.hline; if (o.hline > ymax) ymax = o.hline; }
     var pad = (ymax - ymin) * 0.12 || 1e-6; ymin -= pad; ymax += pad;
     var PX = function (v) { return L + (v - x0) / (x1 - x0) * (w - L - R); };
     var PY = function (v) { return T + (1 - (v - ymin) / (ymax - ymin)) * (h - T - B); };
@@ -743,14 +1136,14 @@ var XTALK_PNG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABxwAAALYCAYAAABG0Ie
       ctx.beginPath(); ctx.moveTo(L, gy + .5); ctx.lineTo(w - R, gy + .5); ctx.stroke();
       var val = ymax - i / 4 * (ymax - ymin);
       ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      ctx.fillText(val.toFixed(3), L - 6, gy);
+      ctx.fillText(o.yfmt ? o.yfmt(val) : val.toFixed(3), L - 6, gy);
     }
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     for (i = 0; i <= 4; i++) {
       var tv = x0 + i / 4 * (x1 - x0);
-      ctx.fillText(Math.round(tv), PX(tv), h - B + 6);
+      ctx.fillText(o.xfmt ? o.xfmt(tv) : Math.round(tv), PX(tv), h - B + 6);
     }
-    ctx.fillText('time (frames)', (L + w - R) / 2, h - 12);
+    ctx.fillText(o.xlabel || 'time (frames)', (L + w - R) / 2, h - 12);
 
     if (o.vlines) o.vlines.forEach(function (v) {
       ctx.setLineDash(v.dash || []); ctx.lineWidth = 1.6; ctx.strokeStyle = v.color;
@@ -761,12 +1154,35 @@ var XTALK_PNG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABxwAAALYCAYAAABG0Ie
       ctx.fillStyle = v.color; ctx.fillText(v.label, 0, 0); ctx.restore();
     });
 
+    if (o.hline != null) {
+      ctx.setLineDash([5, 4]); ctx.lineWidth = 1.4;
+      ctx.strokeStyle = o.hlineColor || C.muted;
+      ctx.beginPath(); ctx.moveTo(L, PY(o.hline) + .5); ctx.lineTo(w - R, PY(o.hline) + .5); ctx.stroke();
+      ctx.setLineDash([]);
+      if (o.hlineLabel) {
+        ctx.font = '650 10px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+        ctx.fillStyle = o.hlineColor || C.muted;
+        ctx.fillText(o.hlineLabel, L + 6, PY(o.hline) - 3);
+      }
+    }
     ctx.beginPath();
     for (i = 0; i < xs.length; i++) {
       var px = PX(xs[i]), py = PY(ys[i]);
       if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
     }
     ctx.lineWidth = 2; ctx.strokeStyle = o.color || C.accent; ctx.stroke();
+    (o.series || []).forEach(function (sr) {
+      var q, qx, qy;
+      ctx.beginPath();
+      for (q = 0; q < xs.length; q++) {
+        qx = PX(xs[q]); qy = PY(sr.y[q]);
+        if (q) ctx.lineTo(qx, qy); else ctx.moveTo(qx, qy);
+      }
+      ctx.setLineDash(sr.dash || []);
+      ctx.lineWidth = sr.lw || 1.8; ctx.strokeStyle = sr.color || C.muted; ctx.stroke();
+      ctx.setLineDash([]);
+    });
 
     if (o.mark != null) {
       var mp = [PX(o.mark[0]), PY(o.mark[1])];
@@ -948,7 +1364,8 @@ var XTALK_PNG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABxwAAALYCAYAAABG0Ie
   slider.addEventListener('input', function () { setStep(parseInt(slider.value, 10), true); });
   document.addEventListener('keydown', function (e) {
     var t = e.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT'
+              || t.tagName === 'BUTTON' || t.tagName === 'SUMMARY')) return;
     if (e.code === 'Space' || e.key === ' ') { e.preventDefault(); setPlaying(!P.playing); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); setStep(P.i + 1, true); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); setStep(P.i - 1, true); }
@@ -968,6 +1385,468 @@ var XTALK_PNG="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABxwAAALYCAYAAABG0Ie
 
   setStep(0, false);
   if (!REDUCED) setPlaying(true);
+
+  /* =====================================================================
+     SECTION 1b -- "HOW IT ACTUALLY WORKS": four live widgets.
+
+     These re-run, in the browser, exactly the construction the pipeline
+     uses (vsa.py / classroom_pipeline.py):
+
+       Phasor(dim, seed)        phases ~ U(0, 2*pi);  values = exp(i*phases)
+       Phasor.fpe(a)            values ** a          == exp(i * phase * a)
+       Phasor.bind              elementwise multiply == phase addition
+       Phasor.unbind            elementwise divide   == phase subtraction
+       Phasor.bundle            elementwise mean
+       Phasor.similarity        (1/D) * Re sum conj(a) b
+       circular_base(dim, seed) values = exp(i*k), k integer in +-{1,2,3}
+       ctx_pos(x, y)            (Bx ** (x/l)) * (By ** (y/l)),  l = 0.75 m
+       ctx_head(psi)            Bhead ** psi
+
+     Every vector here is unit modulus, so a phasor is carried as its phase
+     array alone: bind/unbind are +/- on phases and similarity is the mean
+     of cos(phase difference).  D = 1024 with an independent draw; the
+     exported memory used everywhere else on this page is D = 8192.
+     ===================================================================== */
+  var TAU = 6.283185307179586;
+  var HDW = 1024;                       /* widget dimensionality           */
+  var POS_L = 0.75;                     /* pos_length_scale, metres        */
+
+  function rngOf(seed) {                /* mulberry32, so the draw is fixed */
+    var a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function uniPh(n, rnd) {              /* Phasor(dim=n): phases ~ U(0,2pi) */
+    var p = new Float64Array(n), i;
+    for (i = 0; i < n; i++) p[i] = rnd() * TAU;
+    return p;
+  }
+  function raf1(fn) {                   /* coalesce slider input to a frame */
+    var q = false;
+    return function () {
+      if (q) return;
+      q = true;
+      requestAnimationFrame(function () { q = false; fn(); });
+    };
+  }
+  function sci(v) { return v === 0 ? '0' : Number(v).toExponential(2); }
+  function sgn(v, d) { return (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d); }
+  var MONOFONT = '10px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
+  var UIFONT = '10px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
+
+  /* --------------------- W1: the position code ----------------------- */
+  (function () {
+    var cvD = $('#cvW1Dial'), cvF = $('#cvW1Field'), cvS = $('#cvW1Slice');
+    var sx = $('#w1x'), sy = $('#w1y');
+    if (!cvD || !cvF || !cvS || !sx || !sy) return;
+
+    var rnd = rngOf(0x51DE01);
+    var BX = uniPh(HDW, rnd), BY = uniPh(HDW, rnd);   /* Bx, By base phases */
+    var EXT = RE.extent;
+
+    sx.min = EXT[0].toFixed(2); sx.max = EXT[1].toFixed(2); sx.step = '0.05'; sx.value = '0.00';
+    sy.min = EXT[2].toFixed(2); sy.max = EXT[3].toFixed(2); sy.step = '0.05'; sy.value = '2.00';
+
+    /* sim(S(p), S(p + (dx,dy))) -- depends only on the displacement */
+    function kern(dx, dy) {
+      var s = 0, m, u = dx / POS_L, v = dy / POS_L;
+      for (m = 0; m < HDW; m++) s += Math.cos(BX[m] * u + BY[m] * v);
+      return s / HDW;
+    }
+
+    var NX = 36, NY = 36;
+    var fbuf = new Uint8Array(NX * NY), fval = new Float64Array(NX * NY);
+    var FIELD = { nx: NX, ny: NY, __b: fbuf };        /* row 0 = lowest y */
+    var fcx = NaN, fcy = NaN;
+    function ensureField(x, y) {
+      if (x === fcx && y === fcy) return;
+      fcx = x; fcy = y;
+      var i, j, gx, gy, s, lo = Infinity, hi = -Infinity;
+      for (j = 0; j < NY; j++) {
+        gy = EXT[2] + (j + 0.5) / NY * (EXT[3] - EXT[2]);
+        for (i = 0; i < NX; i++) {
+          gx = EXT[0] + (i + 0.5) / NX * (EXT[1] - EXT[0]);
+          s = kern(gx - x, gy - y);
+          fval[j * NX + i] = s;
+          if (s < lo) lo = s;
+          if (s > hi) hi = s;
+        }
+      }
+      var r = (hi - lo) || 1;
+      for (i = 0; i < NX * NY; i++) fbuf[i] = Math.round(255 * (fval[i] - lo) / r);
+    }
+
+    var NS = 161, SX = new Float64Array(NS), SA = new Float64Array(NS), SB = new Float64Array(NS);
+    (function () {
+      var i;
+      for (i = 0; i < NS; i++) SX[i] = -4 + 8 * i / (NS - 1);
+      for (i = 0; i < NS; i++) { SA[i] = kern(SX[i], 0); SB[i] = kern(0, SX[i]); }
+    })();
+
+    function drawDials(x, y) {
+      var f = fit(cvD); if (!f) return;
+      var ctx = f.ctx, C = colors(), n = 8, m, a, cx, cy;
+      ctx.fillStyle = C.panel; ctx.fillRect(0, 0, f.w, f.h);
+      var cw = f.w / n, ch = f.h / n, R = Math.min(cw, ch) / 2 - 3;
+      for (m = 0; m < n * n; m++) {
+        cx = (m % n) * cw + cw / 2;
+        cy = ((m / n) | 0) * ch + ch / 2;
+        a = BX[m] * x / POS_L + BY[m] * y / POS_L;
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU);
+        ctx.fillStyle = lutCss((1 + Math.cos(a)) / 2); ctx.fill();
+        ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + R * 0.8 * Math.cos(a), cy - R * 0.8 * Math.sin(a));
+        ctx.lineWidth = 2.6; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.stroke();
+        ctx.lineWidth = 1.3; ctx.strokeStyle = '#fff'; ctx.stroke();
+      }
+    }
+
+    /* the homomorphism, done the honest way: BIND the two complex vectors
+       (a complex multiply, not a phase add) and compare against S(a+b) */
+    function homo(ax, ay, bx, by) {
+      var m, maxB = 0, maxU = 0, dot = 0;
+      var ua = ax / POS_L, va = ay / POS_L, ub = bx / POS_L, vb = by / POS_L;
+      for (m = 0; m < HDW; m++) {
+        var pa = BX[m] * ua + BY[m] * va;
+        var pb = BX[m] * ub + BY[m] * vb;
+        var pc = BX[m] * (ua + ub) + BY[m] * (va + vb);
+        var pd = BX[m] * (ua - ub) + BY[m] * (va - vb);
+        var ca = Math.cos(pa), sa = Math.sin(pa), cb = Math.cos(pb), sb = Math.sin(pb);
+        var re = ca * cb - sa * sb, im = ca * sb + sa * cb;          /* bind   */
+        var cc = Math.cos(pc), ss = Math.sin(pc);
+        var d = Math.sqrt((re - cc) * (re - cc) + (im - ss) * (im - ss));
+        if (d > maxB) maxB = d;
+        dot += re * cc + im * ss;
+        var r2 = ca * cb + sa * sb, i2 = sa * cb - ca * sb;          /* unbind */
+        var cd = Math.cos(pd), sd = Math.sin(pd);
+        var d2 = Math.sqrt((r2 - cd) * (r2 - cd) + (i2 - sd) * (i2 - sd));
+        if (d2 > maxU) maxU = d2;
+      }
+      return [maxB, maxU, dot / HDW];
+    }
+    var HSMALL = homo(0.10, 0.05, 0.07, -0.03)[0];
+
+    function render() {
+      var x = parseFloat(sx.value), y = parseFloat(sy.value);
+      $('#w1xv').textContent = x.toFixed(2) + ' m';
+      $('#w1yv').textContent = y.toFixed(2) + ' m';
+
+      drawDials(x, y);
+      ensureField(x, y);
+      drawScene(cvF, {
+        extent: EXT, field: FIELD,
+        markers: [
+          { type: 'ring', x: 0, y: 0, color: css('--c-truth'), r: 8 },
+          { type: 'cross', x: x, y: y, color: css('--c-peak'), r: 8 }
+        ]
+      });
+
+      var s0 = kern(x, y);                       /* sim(S(0,0), S(x,y)) */
+      drawChart(cvS, {
+        x: SX, y: SA, color: css('--c-exact'),
+        series: [{ y: SB, color: css('--c-class'), lw: 1.9 }],
+        hline: s0, hlineColor: css('--accent'),
+        hlineLabel: 'your point vs the origin = ' + s0.toFixed(3),
+        xlabel: 'displacement from the chosen point (m)',
+        xfmt: function (v) { return v.toFixed(1); },
+        yfmt: function (v) { return v.toFixed(2); },
+        vlines: [
+          { t: -POS_L, color: css('--muted'), label: '', dash: [4, 3] },
+          { t: POS_L, color: css('--muted'), label: 'l = 0.75 m', dash: [4, 3] }
+        ]
+      });
+
+      var H = homo(x, y, 1.30, -0.70);
+      $('#w1out').innerHTML =
+        '<div><b>sim(S(0,0), S(x,y))</b> = ' + sgn(s0, 4) + ' &nbsp; <span class="note">the mean of ' +
+        'cos(phase) over ' + HDW + ' dimensions, i.e. the average shade of the dial grid; your ' +
+        'point is ' + Math.sqrt(x * x + y * y).toFixed(2) + ' m from the origin</span></div>' +
+        '<div style="margin-top:7px"><b>homomorphism</b> &nbsp; S(a) &otimes; S(b) = S(a+b) &nbsp; ' +
+        '<span class="note">a = your point, b = (1.30, &minus;0.70) m</span></div>' +
+        '<div>&nbsp;&nbsp;max |difference| over ' + HDW + ' dims = <b>' + sci(H[0]) +
+        '</b> &nbsp;&nbsp; similarity of the two sides = <b>' + H[2].toFixed(15) + '</b></div>' +
+        '<div><b>unbinding</b> &nbsp; S(a) &#8856; S(b) = S(a&minus;b) &nbsp;&nbsp; ' +
+        'max |difference| = <b>' + sci(H[1]) + '</b></div>' +
+        '<div class="note" style="margin-top:6px">That residual is rounding, not error: it grows ' +
+        'with the size of the phases involved, which reach a few hundred radians at room scale. ' +
+        'Run the identical check with tiny displacements &mdash; a = (0.10,&nbsp;0.05), ' +
+        'b = (0.07,&nbsp;&minus;0.03) &mdash; and it falls to <b>' + sci(HSMALL) +
+        '</b>, about one unit in the last place of a double.</div>';
+    }
+
+    var rr = raf1(render);
+    sx.addEventListener('input', rr);
+    sy.addEventListener('input', rr);
+    redraws.push(render);
+    render();
+  })();
+
+  /* --------------------- W2: the heading code ------------------------ */
+  (function () {
+    var cvP = $('#cvW2Polar'), cvL = $('#cvW2Line'), sp = $('#w2p'), tg = $('#w2toggle');
+    if (!cvP || !cvL || !sp || !tg) return;
+
+    var rnd = rngOf(0x51DE02), i;
+    var KF = new Float64Array(HDW), PHU = new Float64Array(HDW);
+    for (i = 0; i < HDW; i++) KF[i] = 1 + Math.floor(rnd() * 3);       /* randint(1, 4)    */
+    for (i = 0; i < HDW; i++) KF[i] *= (rnd() < 0.5 ? -1 : 1);         /* choice([-1, 1])  */
+    for (i = 0; i < HDW; i++) PHU[i] = rnd() * TAU;                    /* an ordinary base */
+
+    function simC(p) { var s = 0, m; for (m = 0; m < HDW; m++) s += Math.cos(KF[m] * p); return s / HDW; }
+    function simO(p) { var s = 0, m; for (m = 0; m < HDW; m++) s += Math.cos(PHU[m] * p); return s / HDW; }
+    function maxDev(ph, p) {                 /* max_m |base**(p+2pi) - base**p| */
+      var m, mx = 0;
+      for (m = 0; m < HDW; m++) {
+        var a1 = ph[m] * p, a2 = ph[m] * (p + TAU);
+        var dx = Math.cos(a2) - Math.cos(a1), dy = Math.sin(a2) - Math.sin(a1);
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (d > mx) mx = d;
+      }
+      return mx;
+    }
+
+    /* sampled over [-1.2, 1.2] turns; index 288 is psi = 0 and 528 is +2pi,
+       so the polar panel can reuse exactly one turn of the same array */
+    var NP = 577, I0 = 288, I1 = 528;
+    var PS = new Float64Array(NP), SC = new Float64Array(NP), SO = new Float64Array(NP);
+    for (i = 0; i < NP; i++) {
+      PS[i] = -1.2 * TAU + 2.4 * TAU * i / (NP - 1);
+      SC[i] = simC(PS[i]);
+      SO[i] = simO(PS[i]);
+    }
+
+    sp.min = (-TAU).toFixed(4); sp.max = TAU.toFixed(4); sp.step = '0.01'; sp.value = '1.20';
+    var showOrd = false;
+
+    function rad(R, s) {                      /* map sim in [-0.5, 1] onto the dial */
+      var t = (s + 0.5) / 1.5;
+      return R * (0.12 + 0.88 * Math.max(0, Math.min(1, t)));
+    }
+    function drawPolarW(psi) {
+      var f = fit(cvP); if (!f) return;
+      var ctx = f.ctx, C = colors();
+      var cx = f.w / 2, cy = f.h / 2, R = Math.min(f.w, f.h) / 2 - 24, a;
+      ctx.fillStyle = C.panel; ctx.fillRect(0, 0, f.w, f.h);
+      ctx.strokeStyle = C.line; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);
+      ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.stroke();
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.arc(cx, cy, rad(R, 0), 0, TAU); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = UIFONT; ctx.fillStyle = C.muted; ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left'; ctx.fillText('0', cx + R + 5, cy);
+      ctx.textAlign = 'right'; ctx.fillText('π', cx - R - 5, cy);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom'; ctx.fillText('π/2', cx, cy - R - 4);
+      ctx.textBaseline = 'top'; ctx.fillText('−π/2', cx, cy + R + 4);
+      ctx.textBaseline = 'bottom'; ctx.textAlign = 'left';
+      ctx.fillText('sim = 0', cx + 5, cy - rad(R, 0) - 3);
+
+      function curve(arr, color, fill) {
+        var j, p, r, px, py;
+        ctx.beginPath();
+        for (j = I0; j <= I1; j++) {
+          p = PS[j]; r = rad(R, arr[j]);
+          px = cx + r * Math.cos(p); py = cy - r * Math.sin(p);
+          if (j === I0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        if (fill) { ctx.fillStyle = 'rgba(94,190,140,.16)'; ctx.fill(); }
+        ctx.lineWidth = 2; ctx.strokeStyle = color; ctx.stroke();
+      }
+      if (showOrd) {
+        ctx.setLineDash([4, 3]);
+        curve(SO, css('--c-exact'), false);
+        ctx.setLineDash([]);
+      }
+      curve(SC, css('--accent'), true);
+
+      a = Math.atan2(Math.sin(psi), Math.cos(psi));
+      ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.6)';
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + R * Math.cos(a), cy - R * Math.sin(a)); ctx.stroke();
+      ctx.lineWidth = 2; ctx.strokeStyle = css('--c-peak');
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + R * Math.cos(a), cy - R * Math.sin(a)); ctx.stroke();
+      var rr2 = rad(R, simC(psi));
+      ctx.beginPath(); ctx.arc(cx + rr2 * Math.cos(a), cy - rr2 * Math.sin(a), 4, 0, TAU);
+      ctx.fillStyle = css('--c-peak'); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, 3, 0, TAU); ctx.fillStyle = C.ink; ctx.fill();
+    }
+
+    function render() {
+      var psi = parseFloat(sp.value);
+      $('#w2pv').textContent = psi.toFixed(2) + ' rad (' + (psi * 180 / Math.PI).toFixed(0) + '°)';
+      drawPolarW(psi);
+      drawChart(cvL, {
+        x: PS, y: SC, color: css('--accent'),
+        series: showOrd ? [{ y: SO, color: css('--c-exact'), lw: 1.8, dash: [5, 3] }] : [],
+        mark: [psi, simC(psi)],
+        xlabel: 'heading ψ (radians)',
+        xfmt: function (v) { return (v / Math.PI).toFixed(1) + 'π'; },
+        yfmt: function (v) { return v.toFixed(2); },
+        vlines: [
+          { t: -TAU, color: css('--muted'), label: '−2π', dash: [3, 3] },
+          { t: 0, color: css('--muted'), label: '0', dash: [3, 3] },
+          { t: TAU, color: css('--muted'), label: '+2π', dash: [3, 3] }
+        ]
+      });
+
+      var a1 = simC(psi), a2 = simC(psi + TAU), b1 = simO(psi), b2 = simO(psi + TAU);
+      var da = maxDev(KF, psi), db = maxDev(PHU, psi);
+      $('#w2out').innerHTML =
+        '<div><b>circular base</b> <span class="note">&mdash; what <code>circular_base</code> builds, and what the map uses</span></div>' +
+        '<div>&nbsp;&nbsp;sim(head(0), head(&psi;)) = <b>' + sgn(a1, 6) + '</b> &nbsp;&nbsp; ' +
+        'sim(head(0), head(&psi; + 2&pi;)) = <b>' + sgn(a2, 6) + '</b></div>' +
+        '<div>&nbsp;&nbsp;max |head(&psi; + 2&pi;) &minus; head(&psi;)| over ' + HDW +
+        ' dims = <span class="ok">' + sci(da) + '</span> &mdash; exactly periodic</div>' +
+        '<div style="margin-top:7px"><b>ordinary uniform-phase base</b> <span class="note">&mdash; the same FPE, without integer frequencies</span></div>' +
+        '<div>&nbsp;&nbsp;sim(head(0), head(&psi;)) = <b>' + sgn(b1, 6) + '</b> &nbsp;&nbsp; ' +
+        'sim(head(0), head(&psi; + 2&pi;)) = <b>' + sgn(b2, 6) + '</b></div>' +
+        '<div>&nbsp;&nbsp;max |head(&psi; + 2&pi;) &minus; head(&psi;)| over ' + HDW +
+        ' dims = <span class="no">' + sci(db) + '</span> &mdash; a different vector entirely</div>';
+    }
+
+    var rr = raf1(render);
+    sp.addEventListener('input', rr);
+    tg.addEventListener('click', function () {
+      showOrd = !showOrd;
+      tg.setAttribute('aria-pressed', showOrd ? 'true' : 'false');
+      tg.textContent = (showOrd ? 'Hide' : 'Show') + ' ordinary (non-circular) base';
+      render();
+    });
+    redraws.push(render);
+    render();
+  })();
+
+  /* ------------- W3: bind / bundle / unbind, and capacity ------------- */
+  (function () {
+    var cvB = $('#cvW3Bars'), cvC = $('#cvW3Chart'), sk = $('#w3k'), dimBox = $('#w3dims');
+    if (!cvB || !cvC || !sk || !dimBox) return;
+
+    var KMAX = 40, DOPTS = [64, 256, 1024, 4096], Dcur = HDW, kcur = 8;
+    var cum = [], KS = new Float64Array(KMAX), MARG = new Float64Array(KMAX), THEO = new Float64Array(KMAX);
+    var sims = new Float64Array(KMAX);
+
+    /* k (atom (x) place) pairs bundled into one trace, unbound by atom 0.
+       c[i][j] = sim( atom_i (x) place_i (/) atom_0 , place_j ), accumulated,
+       so the similarity at load k is just cum[k-1][j] / k -- bundle is a MEAN. */
+    function build(D) {
+      var rnd = rngOf(0x51DE03), AT = [], PC = [], i, j, m;
+      for (i = 0; i < KMAX; i++) AT.push(uniPh(D, rnd));      /* class atoms */
+      for (i = 0; i < KMAX; i++) PC.push(uniPh(D, rnd));      /* place codes */
+      var A0 = AT[0], prev = new Float64Array(KMAX), T = new Float64Array(D);
+      cum = [];
+      for (i = 0; i < KMAX; i++) {
+        for (m = 0; m < D; m++) T[m] = AT[i][m] + PC[i][m] - A0[m];
+        var cu = new Float64Array(KMAX);
+        for (j = 0; j < KMAX; j++) {
+          var s = 0, Pj = PC[j];
+          for (m = 0; m < D; m++) s += Math.cos(Pj[m] - T[m]);
+          cu[j] = prev[j] + s / D;
+        }
+        cum.push(cu); prev = cu;
+      }
+      for (i = 0; i < KMAX; i++) {
+        var k = i + 1, sig = cum[i][0] / k, ss = 0, v;
+        for (j = 1; j < KMAX; j++) { v = cum[i][j] / k; ss += v * v; }
+        var rms = Math.sqrt(ss / (KMAX - 1)) || 1e-12;
+        KS[i] = k; MARG[i] = sig / rms; THEO[i] = Math.sqrt(2 * D / k);
+      }
+    }
+
+    function drawBars() {
+      var f = fit(cvB); if (!f) return;
+      var ctx = f.ctx, C = colors(), w = f.w, h = f.h, j;
+      var L = 48, Rr = 10, T = 10, B = 26;
+      ctx.fillStyle = C.panel; ctx.fillRect(0, 0, w, h);
+      var hi = 0;
+      for (j = 0; j < KMAX; j++) hi = Math.max(hi, Math.abs(sims[j]));
+      hi = hi || 1;
+      var PY = function (v) { return T + (1 - (v + hi) / (2 * hi)) * (h - T - B); };
+      var bw = (w - L - Rr) / KMAX;
+      ctx.strokeStyle = C.line; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(L, PY(0) + .5); ctx.lineTo(w - Rr, PY(0) + .5); ctx.stroke();
+      ctx.font = MONOFONT; ctx.fillStyle = C.muted;
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText(hi.toFixed(3), L - 6, PY(hi));
+      ctx.fillText('0', L - 6, PY(0));
+      ctx.fillText('-' + hi.toFixed(3), L - 6, PY(-hi));
+      for (j = 0; j < KMAX; j++) {
+        var x = L + j * bw, v = sims[j];
+        ctx.fillStyle = j === 0 ? css('--c-peak') : '#9aa4b2';
+        ctx.fillRect(x + 1, Math.min(PY(v), PY(0)), Math.max(1, bw - 2), Math.abs(PY(v) - PY(0)) + 0.5);
+      }
+      ctx.font = UIFONT; ctx.fillStyle = C.muted;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillText('the 40 place codes — index 0 is the one we asked for', (L + w - Rr) / 2, h - 6);
+    }
+
+    function render() {
+      kcur = parseInt(sk.value, 10);
+      $('#w3kv').textContent = kcur + ' of 40';
+      var cu = cum[kcur - 1], j;
+      for (j = 0; j < KMAX; j++) sims[j] = cu[j] / kcur;
+      drawBars();
+      drawChart(cvC, {
+        x: KS, y: MARG, color: css('--accent'),
+        series: [{ y: THEO, color: '#9aa4b2', lw: 1.6, dash: [5, 4] }],
+        mark: [kcur, MARG[kcur - 1]],
+        xlabel: 'items bundled into the one trace, k',
+        xfmt: function (v) { return String(Math.round(v)); },
+        yfmt: function (v) { return v.toFixed(1); }
+      });
+
+      var sig = sims[0], ss = 0, am = 0, mx = 0, av;
+      for (j = 1; j < KMAX; j++) {
+        av = Math.abs(sims[j]);
+        ss += sims[j] * sims[j];
+        am += av;
+        if (av > mx) mx = av;
+      }
+      var rms = Math.sqrt(ss / (KMAX - 1)), top1 = sig > mx;
+      $('#w3out').innerHTML =
+        '<div><b>D = ' + Dcur + '</b> &nbsp; <b>k = ' + kcur + '</b> item' + (kcur === 1 ? '' : 's') +
+        ' bundled into one ' + Dcur + '-dimensional trace ' +
+        '<span class="note">(the trace is the same size at k = 1 and at k = 40)</span></div>' +
+        '<div style="margin-top:6px">&nbsp;&nbsp;<b>signal</b> &nbsp;&nbsp;&nbsp; sim(residual, the correct place) = <b>' +
+        sgn(sig, 5) + '</b> <span class="note">&asymp; 1/k</span></div>' +
+        '<div>&nbsp;&nbsp;<b>crosstalk</b> &nbsp; over the other 39: mean |sim| = <b>' + (am / (KMAX - 1)).toFixed(5) +
+        '</b>, &nbsp;rms = <b>' + rms.toFixed(5) + '</b>, &nbsp;worst = <b>' + mx.toFixed(5) + '</b></div>' +
+        '<div>&nbsp;&nbsp;<b>margin</b> &nbsp;&nbsp;&nbsp; signal &divide; rms(crosstalk) = <b>' + (sig / (rms || 1e-12)).toFixed(2) +
+        '</b> &nbsp;&nbsp; prediction &radic;(2D/k) = <b>' + Math.sqrt(2 * Dcur / kcur).toFixed(2) + '</b></div>' +
+        '<div>&nbsp;&nbsp;<b>top-1</b> &nbsp;&nbsp;&nbsp;&nbsp; is the correct place still the best match? ' +
+        (top1 ? '<span class="ok">yes</span>' : '<span class="no">no &mdash; the readout has failed</span>') +
+        ' <span class="note">(signal &divide; worst crosstalk = ' + (sig / (mx || 1e-12)).toFixed(2) + ')</span></div>';
+    }
+
+    DOPTS.forEach(function (d) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'chip'; b.textContent = String(d);
+      b.setAttribute('aria-pressed', d === Dcur ? 'true' : 'false');
+      b.addEventListener('click', function () {
+        if (d === Dcur) return;
+        Dcur = d;
+        Array.prototype.forEach.call(dimBox.children, function (c) {
+          c.setAttribute('aria-pressed', c.textContent === String(Dcur) ? 'true' : 'false');
+        });
+        build(Dcur);
+        render();
+      });
+      dimBox.appendChild(b);
+    });
+
+    build(Dcur);
+    var rr = raf1(render);
+    sk.addEventListener('input', rr);
+    redraws.push(render);
+    render();
+  })();
 
   /* =====================================================================
      SECTION 2 -- LANGUAGE
