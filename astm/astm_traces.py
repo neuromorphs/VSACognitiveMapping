@@ -1273,10 +1273,24 @@ def _bench_compare(args, ev, table):
         if calibs[n]:
             print("         null " + " | ".join(
                 f"{d}: {c['mean']:+.5f}+/-{c['std']:.5f}"
-                for d, c in calibs[n].items()))
+                for d, c in calibs[n].items() if d != "_meta"))
 
     if curves:
         _save_compare_figure(curves, ev, table, fig_what, fig_xy, args.out_dir)
+
+
+def _null_key_for(tr, decode, trace, kind):
+    """Resolve a null-calibration cell across calibration versions.
+
+    v2 keys are "decode|trace|kind"; v1 stored a single flat key per decode
+    type. Returns the best available key, or None if uncalibrated."""
+    nc = getattr(tr, "null_calib", None)
+    if not nc:
+        return None
+    for k in (f"{decode}|{trace}|{kind}", decode):
+        if k in nc:
+            return k
+    return next((k for k in nc if k != "_meta" and k.startswith(f"{decode}|")), None)
 
 
 def _bias_bench(args, ev, table):
@@ -1319,10 +1333,13 @@ def _bias_bench(args, ev, table):
             res[c] = {"sim": info["sim"], "z": info["z"],
                       "confident": info["confident"], "err": err, "ans": ans}
         results[wmode] = res
-        calibs[wmode] = tr.null_calib["where"] if tr.null_calib else None
+        # v2 nulls are keyed "decode|trace|kind"; these are all-time where(what)
+        # marginal queries, so report the matching cell (v1 fallback: "where").
+        wkey = _null_key_for(tr, "where", "what_where", "none")
+        calibs[wmode] = tr.null_calib[wkey] if wkey else None
         print(f"[{wmode:8s}] built+queried in {time.perf_counter() - t0:.0f}s"
               + ("" if not calibs[wmode] else
-                 f"  null(where): mean={calibs[wmode]['mean']:+.5f} "
+                 f"  null({wkey}): mean={calibs[wmode]['mean']:+.5f} "
                  f"std={calibs[wmode]['std']:.5f}"))
         del tr, router
 

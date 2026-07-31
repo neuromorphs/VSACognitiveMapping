@@ -8,6 +8,17 @@ running the *actual* `init-am` code as the episodic-memory engine (via the
 `external/` snapshot noted below) and extending it with a multi-trace
 spatio-temporal memory, calibration, working memory, and language queries.
 
+## ▸ Read the results first (rendered, no clone needed)
+
+**[Results briefing — every measured result, for a robotics audience](https://raw.githack.com/neuromorphs/VSACognitiveMapping/astm/astm/docs/results_robotics_share.html)**
+· [concept explainer](https://raw.githack.com/neuromorphs/VSACognitiveMapping/astm/astm/docs/demo_explainer.html)
+· [code explainer](https://raw.githack.com/neuromorphs/VSACognitiveMapping/astm/astm/docs/code_explainer.html)
+· [all docs + mirrors](docs/README.md)
+
+(GitHub renders `.html` as source; those links proxy the raw files so they
+display as pages. Markdown docs — [working document v2](docs/working-document-v2.md)
+— render natively here.)
+
 ## What's here
 
 | File | What it does |
