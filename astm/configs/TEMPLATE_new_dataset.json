@@ -1,0 +1,48 @@
+{
+  "_README": [
+    "Copy this file, edit it, then run:",
+    "  python -m vsa_cognitive_mapping.sequences validate --dataset vsa_cognitive_mapping/configs/MY.json",
+    "Validate first. It decodes a few frames, checks the pose stream is physically",
+    "plausible, and prints which analyses your dataset supports. A sequence with no",
+    "poses is still fully usable for the image-only work (crop features, isotropy,",
+    "Timkey, encoder comparison, crop retrieval).",
+    "",
+    "kind = 'folder' for local images, 'huggingface' for an HF dataset.",
+    "Delete the keys you do not need; '_'-prefixed keys are ignored."
+  ],
+
+  "name": "my_dataset",
+  "kind": "folder",
+  "images": "data/my_dataset/rgb/*.png",
+  "fps": 30,
+  "out_dir": "outputs/my_dataset",
+
+  "poses": {
+    "_kind_options": "tum | csv  — omit the whole 'poses' block if you have none",
+    "kind": "tum",
+    "path": "data/my_dataset/groundtruth.txt",
+    "_axes": "Which two of xyz form the floor plane. Robot data is usually 'xy'; ICL-NUIM's living room is 'xz'.",
+    "axes": "xy",
+    "_rescale_time": "Folder frame times are synthesised from fps. If the pose clock spans a different duration, rescale frame times onto it (default true).",
+    "rescale_time": true
+  },
+
+  "_csv_example": {
+    "kind": "csv",
+    "path": "data/my_dataset/poses.csv",
+    "time": "timestamp_ns",
+    "x": "x",
+    "y": "y",
+    "yaw": "yaw_rad",
+    "_or_quaternion_instead_of_yaw": ["qx", "qy", "qz", "qw"]
+  },
+
+  "_huggingface_example": {
+    "name": "some_hf_run",
+    "kind": "huggingface",
+    "repo": "org/dataset-name",
+    "rgb_config": "rgb",
+    "odom_config": "odometry",
+    "out_dir": "outputs/some_hf_run"
+  }
+}

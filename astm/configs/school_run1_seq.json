@@ -1,0 +1,9 @@
+{
+  "_comment": "Scale-up sequence. Its LIO-SAM odometry is DIVERGED (23 km of path in 455 s, 209 jumps > 5 m, peak implied speed 1595 m/s). `sequences validate` rejects it, so pose-based analyses are unavailable. Image-only analyses on it are fine and have been used.",
+  "name": "school_run1",
+  "kind": "huggingface",
+  "repo": "lorinachey/spot-telluride-workshop-dataset",
+  "rgb_config": "school_run1_rgb_d455",
+  "odom_config": "school_run1_odometry_lio_sam",
+  "out_dir": "outputs/school_run1"
+}

@@ -1,0 +1,8 @@
+{
+  "name": "classroom",
+  "kind": "huggingface",
+  "repo": "lorinachey/spot-telluride-workshop-dataset",
+  "rgb_config": "rgb_d455",
+  "odom_config": "odometry_lio_sam",
+  "out_dir": "outputs/classroom"
+}

@@ -236,21 +236,44 @@ def cmd_embed_crops(args):
     from datasets import load_dataset
     from ultralytics import YOLO
 
+    # --dataset routes through the Sequence abstraction so any configured
+    # sequence works; the older --repo/--rgb-config flags still work for the
+    # HuggingFace case.
+    seq = None
+    if getattr(args, "dataset", None):
+        from vsa_cognitive_mapping.sequences import load_sequence
+        seq = load_sequence(args.dataset)
+        if not args.out_dir or args.out_dir == DEFAULT_OUT:
+            args.out_dir = seq.out_dir
     os.makedirs(args.out_dir, exist_ok=True)
-    ds = load_dataset(args.repo, args.rgb_config, split="train")
-    ts = np.array(ds["timestamp_ns"], dtype=np.int64)
-    order = np.argsort(ts)
-    idx_all = np.array(ds["frame_idx"], dtype=np.int64)
+
+    if seq is not None:
+        n_all = len(seq)
+        ts_sorted = (seq.timestamps_s() * 1e9).astype(np.int64)
+        ids_sorted = seq.frame_ids()
+        order = np.arange(n_all)              # Sequence is already time-ordered
+        ts = ts_sorted
+        idx_all = ids_sorted
+        src = f"{seq.name}"
+    else:
+        ds = load_dataset(args.repo, args.rgb_config, split="train")
+        ts = np.array(ds["timestamp_ns"], dtype=np.int64)
+        order = np.argsort(ts)
+        idx_all = np.array(ds["frame_idx"], dtype=np.int64)
+        n_all = len(ds)
+        src = f"{args.repo} / {args.rgb_config}"
     keep = order[::args.stride]
-    print(f"{args.repo} / {args.rgb_config}: {len(ds)} frames total, "
-          f"cropping every {args.stride} -> {len(keep)} frames")
+    print(f"{src}: {n_all} frames total, cropping every {args.stride} -> {len(keep)} frames")
 
     model = YOLO("yolov8n.pt")
     rows, crop_embs, frame_embs = [], [], []
     n_tiny = 0
 
+    def _image(row):
+        return seq.image(int(row)) if seq is not None else ds[int(row)]["image"]
+
     for n, i in enumerate(keep):
-        img = ds[int(i)]["image"]                       # PIL RGB
+        img = _image(i)                                 # PIL RGB
         W, H = img.size
         res = model.predict(img, verbose=False)[0]
         if args.keep_frame_embed:
@@ -1371,11 +1394,17 @@ def main():
                      help="boxes with a shorter side than this are still embedded but "
                           "flagged 'tiny' -- their crops are mostly upsampling artefact")
     pec.add_argument("--crops-name", default="crop_embeddings.pt")
+    pec.add_argument("--dataset", default=None,
+                     help="path to a sequence config JSON (see "
+                          "vsa_cognitive_mapping/configs/TEMPLATE_new_dataset.json). "
+                          "Preferred: works for local folders as well as HF, and "
+                          "sets --out-dir from the config. Validate it first with "
+                          "`python -m vsa_cognitive_mapping.sequences validate`.")
     pec.add_argument("--repo", default=DATASET)
     pec.add_argument("--rgb-config", default="rgb_d455",
-                     help="HF config name. NOTE: --out-dir alone does NOT select a "
-                          "sequence -- pass e.g. --rgb-config school_run1_rgb_d455 "
-                          "or this silently re-crops the classroom stream")
+                     help="HF config name, used only when --dataset is absent. "
+                          "NOTE: --out-dir alone does NOT select a sequence -- pass "
+                          "--rgb-config too or this silently re-crops the classroom")
     pec.add_argument("--keep-frame-embed", action="store_true",
                      help="also embed the whole frame, for a like-for-like isotropy "
                           "comparison on exactly these frames")

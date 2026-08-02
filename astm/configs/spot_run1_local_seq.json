@@ -1,0 +1,15 @@
+{
+  "_comment": "Worked example of the 'folder' path: local JPEGs on disk plus CSV poses, no HuggingFace. Produced by the jepa branch's run1_to_transitions.py. The pose CSV has one row per transition with the frame's own pose in x_t/y_t/yaw_t_rad, and rows are in frame order at the same rate as the images, so 'time' is omitted and row index is used for both streams.",
+  "name": "spot_run1_local",
+  "kind": "folder",
+  "images": "C:/vsacm_jepa/data/spot_run1/images/*.jpg",
+  "fps": 3,
+  "out_dir": "outputs/spot_run1_local",
+  "poses": {
+    "kind": "csv",
+    "path": "C:/vsacm_jepa/data/spot_run1/transitions.csv",
+    "x": "x_t",
+    "y": "y_t",
+    "yaw": "yaw_t_rad"
+  }
+}

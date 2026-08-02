@@ -140,9 +140,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out-dir", default="outputs/classroom")
+    ap.add_argument("--dataset", default=None,
+                    help="sequence config JSON (preferred; works for local folders "
+                         "too and sets --out-dir). See configs/TEMPLATE_new_dataset.json")
     ap.add_argument("--repo", default=DATASET)
     ap.add_argument("--rgb-config", default="rgb_d455",
-                    help="HF config name, e.g. school_run1_rgb_d455")
+                    help="HF config name, used only when --dataset is absent")
     ap.add_argument("--encoders", nargs="+",
                     default=["resnet50", "dinov2", "resnet50-untrained"])
     ap.add_argument("--pad-frac", type=float, default=0.08,
@@ -152,14 +155,26 @@ def main():
                     help="cap detections (0 = all); use for a fast smoke run")
     args = ap.parse_args()
 
-    from datasets import load_dataset
+    seq = None
+    if args.dataset:
+        from vsa_cognitive_mapping.sequences import load_sequence
+        seq = load_sequence(args.dataset)
+        if args.out_dir == "outputs/classroom":
+            args.out_dir = seq.out_dir
+
     rows = load_boxes(args.out_dir)
     if args.limit:
         rows = rows[:args.limit]
     print(f"{len(rows)} boxes read from detections_crops.csv")
 
-    ds = load_dataset(args.repo, args.rgb_config, split="train")
-    idx_all = np.array(ds["frame_idx"], dtype=np.int64)
+    if seq is not None:
+        idx_all = seq.frame_ids()
+        get_image = lambda r: seq.image(int(r))          # noqa: E731
+    else:
+        from datasets import load_dataset
+        ds = load_dataset(args.repo, args.rgb_config, split="train")
+        idx_all = np.array(ds["frame_idx"], dtype=np.int64)
+        get_image = lambda r: ds[int(r)]["image"]        # noqa: E731
     pos = {int(v): i for i, v in enumerate(idx_all)}
 
     by_frame = defaultdict(list)
@@ -186,7 +201,7 @@ def main():
             i = pos.get(fi)
             if i is None:
                 continue
-            img = ds[int(i)]["image"]
+            img = get_image(i)
             W, H = img.size
             for k in by_frame[fi]:
                 _, _, x1, y1, x2, y2 = rows[k]
