@@ -96,6 +96,41 @@ def content_variants(emb, hd, seed, n_pca):
             z_wht.numpy().astype(np.complex128))
 
 
+def crop_frame_descriptors(out_dir, fname):
+    """Per-frame content from a per-DETECTION crop-embedding file.
+
+    The 365x/22x figures were all measured on ``embeddings.pt`` -- YOLOv8n's
+    whole-frame penultimate feature, which the encoder comparison showed is the
+    most anisotropic representation available. Quoting a whitening multiplier
+    measured on the worst encoder overstates it, so the metric has to be
+    re-runnable on any backbone.
+
+    A frame's descriptor is the mean of its crops, L2-normalised, matching how
+    the video exporter and the localisation memory build content. Timestamps
+    come from ``crop_embeddings.pt`` (the YOLO crop pass records them; the
+    other encoders' files carry only ``frame_idx``).
+    """
+    d = torch.load(os.path.join(out_dir, fname), weights_only=False)
+    X = d["embedding"].numpy().astype(np.float64)
+    fr = d["frame_idx"].numpy()
+
+    base = torch.load(os.path.join(out_dir, "crop_embeddings.pt"), weights_only=False)
+    ts_of = {}
+    for f, t in zip(base["frame_idx"].numpy(), base["timestamp_ns"].numpy()):
+        ts_of.setdefault(int(f), int(t))
+
+    uf, inv = np.unique(fr, return_inverse=True)
+    Dsc = np.zeros((len(uf), X.shape[1]), dtype=np.float64)
+    np.add.at(Dsc, inv, X)
+    Dsc /= np.maximum(np.bincount(inv, minlength=len(uf)).astype(np.float64)[:, None], 1)
+    Dsc /= (np.linalg.norm(Dsc, axis=1, keepdims=True) + 1e-12)
+
+    keep = np.array([i for i, f in enumerate(uf) if int(f) in ts_of])
+    ts = np.array([ts_of[int(uf[i])] for i in keep], dtype=np.int64)
+    o = np.argsort(ts)
+    return ts[o], Dsc[keep][o]
+
+
 def mean_offdiag_cos(C, n_sub, rng):
     """Mean off-diagonal Re<c_i,c_j>/D over an n_sub-row subsample."""
     idx = rng.choice(C.shape[0], size=min(n_sub, C.shape[0]), replace=False)
@@ -141,13 +176,28 @@ def main():
                     help="probes per (N, seed) config")
     ap.add_argument("--sub-seeds", type=int, nargs="+", default=[0, 1, 2])
     ap.add_argument("--no-figure", action="store_true")
+    ap.add_argument("--content", default="frames",
+                    help="'frames' = embeddings.pt (YOLOv8n whole-frame feature, "
+                         "what the 365x/22x figures were measured on), or a "
+                         "crop-embedding filename to use per-frame descriptors "
+                         "from another backbone, e.g. crop_embeddings_dinov2.pt")
+    ap.add_argument("--tag", default=None,
+                    help="label for printed output and the figure filename")
+    ap.add_argument("--odom-config", default="odometry_lio_sam",
+                    help="pass school_run1_odometry_lio_sam when --out-dir "
+                         "points at the scale-up sequence")
     args = ap.parse_args()
 
-    _fi, ts, emb = _load_embeddings(args.out_dir)
+    if args.content == "frames":
+        _fi, ts, emb = _load_embeddings(args.out_dir)
+        src = "embeddings.pt (YOLOv8n whole-frame, stride-2 of the 2478-frame walk)"
+    else:
+        ts, emb = crop_frame_descriptors(args.out_dir, args.content)
+        src = f"{args.content} (per-detection crops -> per-frame mean descriptor)"
     N_all = len(ts)
-    x, y, _psi = load_poses_interpolated(ts)
-    print(f"{N_all} embedded frames (stride-2 of the 2478-frame walk); "
-          f"hd={args.hd_dim}")
+    x, y, _psi = load_poses_interpolated(ts, odom_config=args.odom_config)
+    print(f"{N_all} frames of content from {src}; hd={args.hd_dim}, "
+          f"input dim={emb.shape[1]}")
 
     C_raw, C_wht = content_variants(emb, args.hd_dim, args.seed, args.n_pca)
     enc = ClassroomEncoders(args.hd_dim, args.seed + 100,
@@ -168,7 +218,9 @@ def main():
     print(f"  raw EMBEDDING mean off-diag cos: "
           f"{Se[~np.eye(300, dtype=bool)].mean():+.4f}")
 
-    Ns = [n for n in (50, 100, 200, 400, 800, 1600) if n < N_all] + [N_all]
+    # extended past 1600 so school_run1 (~10k frame descriptors) is sampled
+    # along the way rather than jumping straight from 1600 to the endpoint
+    Ns = [n for n in (50, 100, 200, 400, 800, 1600, 3200, 6400) if n < N_all] + [N_all]
     results = {"raw": {}, "whitened": {}}
     for name, C in (("raw", C_raw), ("whitened", C_wht)):
         for n in Ns:
@@ -248,10 +300,15 @@ def main():
             ax.set_title(title, fontsize=9)
             ax.grid(alpha=0.3, which="both")
             ax.legend(fontsize=8)
-        fig.suptitle(f"Crosstalk scaling, hd={args.hd_dim}, 3 subsample "
-                     f"seeds; endpoint N={n_end} = all stride-2 embedded "
-                     f"frames (quoted public figures: 365x/27x)", fontsize=10)
-        path = os.path.join(args.out_dir, "crosstalk_scaling.png")
+        lbl = args.tag or ("yolov8n frames" if args.content == "frames"
+                           else args.content.replace("crop_embeddings_", "")
+                                            .replace(".pt", "") + " crops")
+        fig.suptitle(f"Crosstalk scaling — content: {lbl}, hd={args.hd_dim}, "
+                     f"3 subsample seeds; endpoint N={n_end}", fontsize=10)
+        # tag the filename: a fixed name silently overwrote the YOLO figure when
+        # the same metric was re-run on a different backbone
+        suffix = "" if args.content == "frames" else "_" + lbl.replace(" ", "_")
+        path = os.path.join(args.out_dir, f"crosstalk_scaling{suffix}.png")
         fig.savefig(path, dpi=140)
         print(f"saved {path}")
 

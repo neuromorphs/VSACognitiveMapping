@@ -47,6 +47,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
 import os
 import sys
 from collections import defaultdict
@@ -78,13 +79,18 @@ def quat_to_yaw(qx, qy, qz, qw):
     return np.arctan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
 
 
-def load_poses_interpolated(frame_ts: np.ndarray):
+def load_poses_interpolated(frame_ts: np.ndarray, repo: str = None,
+                            odom_config: str = "odometry_lio_sam"):
     """LIO-SAM poses (~6 Hz) interpolated to the RGB frame timestamps.
 
     Returns (x, y, yaw) arrays aligned with frame_ts. Frames outside the pose
-    time range are clamped to the nearest pose (np.interp behaviour)."""
+    time range are clamped to the nearest pose (np.interp behaviour).
+
+    ``odom_config`` defaults to the classroom's; pass
+    ``school_run1_odometry_lio_sam`` for the scale-up sequence. Callers that
+    omit it keep the previous behaviour exactly."""
     from datasets import load_dataset
-    odo = load_dataset(DATASET, "odometry_lio_sam", split="train")
+    odo = load_dataset(repo or DATASET, odom_config, split="train")
     ot = np.array(odo["timestamp_ns"], dtype=np.float64)
     order = np.argsort(ot)
     ot = ot[order]
@@ -179,6 +185,158 @@ def cmd_embed(args):
                     "confidence", "x1", "y1", "x2", "y2"])
         w.writerows(det_rows)
     print(f"saved {emb_t.shape} embeddings + {len(det_rows)} detections to {args.out_dir}")
+
+
+def _effective_rank(X):
+    """Participation ratio of the covariance spectrum, plus the 95%-variance
+    component count. Both measure how many directions the features actually
+    use -- a low number means the encoder is wasting its dimensions, which is
+    what makes crosstalk expensive."""
+    Xc = X - X.mean(axis=0, keepdims=True)
+    lam = np.linalg.svd(Xc, compute_uv=False) ** 2
+    if lam.sum() <= 0:
+        return 0.0, 0
+    pr = float(lam.sum() ** 2 / (lam ** 2).sum())
+    csum = np.cumsum(lam) / lam.sum()
+    return pr, int(np.searchsorted(csum, 0.95) + 1)
+
+
+def _isotropy_report(name, X):
+    """Mean off-diagonal cosine + effective rank. High mutual cosine means every
+    stored key looks like every other one, which is exactly the condition that
+    makes an associative memory blur."""
+    Xn = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-12)
+    n = min(len(Xn), 1500)                      # cap the Gram at 1500x1500
+    sel = np.linspace(0, len(Xn) - 1, n).astype(int)
+    G = Xn[sel] @ Xn[sel].T
+    off = G[~np.eye(n, dtype=bool)]
+    pr, k95 = _effective_rank(X)
+    print(f"  {name:<22} n={len(X):<6} dim={X.shape[1]:<5} "
+          f"cos mean={off.mean():+.3f} p05={np.percentile(off, 5):+.3f} "
+          f"p95={np.percentile(off, 95):+.3f}  eff-rank={pr:.1f}  k95={k95}")
+    return {"n": int(len(X)), "dim": int(X.shape[1]), "cos_mean": float(off.mean()),
+            "cos_p95": float(np.percentile(off, 95)), "eff_rank": pr, "k95": k95}
+
+
+def cmd_embed_crops(args):
+    """Per-DETECTION appearance features.
+
+    ``cmd_embed`` calls ``model.embed(img)`` once per *frame*, so every
+    detection in a frame shares one vector. That is fine for "where am I", but
+    it means there is no per-object appearance key anywhere in the pipeline --
+    so a partial-cue query ("find *this* drill", given a crop) degenerates into
+    a 38-class COCO label. This stage crops each YOLO box out of its frame and
+    embeds the crop, giving one appearance vector per detection.
+
+    Writes ``crop_embeddings.pt`` and a self-consistent ``detections_crops.csv``
+    whose row order IS the embedding row order, so ``det_id`` is a positional
+    join key. Prints an isotropy comparison against the frame-level features,
+    because whether crops are worth the compute is exactly that question.
+    """
+    from datasets import load_dataset
+    from ultralytics import YOLO
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    ds = load_dataset(args.repo, args.rgb_config, split="train")
+    ts = np.array(ds["timestamp_ns"], dtype=np.int64)
+    order = np.argsort(ts)
+    idx_all = np.array(ds["frame_idx"], dtype=np.int64)
+    keep = order[::args.stride]
+    print(f"{args.repo} / {args.rgb_config}: {len(ds)} frames total, "
+          f"cropping every {args.stride} -> {len(keep)} frames")
+
+    model = YOLO("yolov8n.pt")
+    rows, crop_embs, frame_embs = [], [], []
+    n_tiny = 0
+
+    for n, i in enumerate(keep):
+        img = ds[int(i)]["image"]                       # PIL RGB
+        W, H = img.size
+        res = model.predict(img, verbose=False)[0]
+        if args.keep_frame_embed:
+            frame_embs.append(model.embed(img, verbose=False)[0].cpu().float())
+
+        crops, meta = [], []
+        for b in res.boxes:
+            x1, y1, x2, y2 = [float(v) for v in b.xyxy[0]]
+            bw, bh = x2 - x1, y2 - y1
+            pad = args.pad_frac * max(bw, bh)
+            cx1 = max(0, int(round(x1 - pad))); cy1 = max(0, int(round(y1 - pad)))
+            cx2 = min(W, int(round(x2 + pad))); cy2 = min(H, int(round(y2 + pad)))
+            if cx2 - cx1 < 2 or cy2 - cy1 < 2:          # degenerate, skip entirely
+                continue
+            tiny = min(bw, bh) < args.min_side
+            n_tiny += int(tiny)
+            crops.append(img.crop((cx1, cy1, cx2, cy2)))
+            meta.append([int(idx_all[i]), int(ts[i]), int(b.cls), model.names[int(b.cls)],
+                         float(b.conf), x1, y1, x2, y2, bw * bh / float(W * H), int(tiny)])
+
+        if crops:
+            embs = model.embed(crops, verbose=False)     # one forward per crop, batched
+            for e in embs:
+                crop_embs.append(e.cpu().float())
+            rows.extend(meta)
+
+        if n % 25 == 0:
+            print(f"  frame {n}/{len(keep)}  crops_so_far={len(rows)}", flush=True)
+
+    if not rows:
+        raise SystemExit("no detections produced any usable crop")
+
+    C = torch.stack(crop_embs)
+    out = {"det_id": torch.arange(len(rows)),
+           "frame_idx": torch.tensor([r[0] for r in rows]),
+           "timestamp_ns": torch.tensor([r[1] for r in rows]),
+           "class_id": torch.tensor([r[2] for r in rows]),
+           "confidence": torch.tensor([r[4] for r in rows], dtype=torch.float32),
+           "area_frac": torch.tensor([r[9] for r in rows], dtype=torch.float32),
+           "tiny": torch.tensor([r[10] for r in rows]),
+           "embedding": C,
+           "meta": {"stride": args.stride, "pad_frac": args.pad_frac,
+                    "min_side": args.min_side, "model": "yolov8n.pt"}}
+    torch.save(out, os.path.join(args.out_dir, args.crops_name))
+
+    with open(os.path.join(args.out_dir, "detections_crops.csv"), "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["det_id", "frame_idx", "timestamp_ns", "class_id", "class_name",
+                    "confidence", "x1", "y1", "x2", "y2", "area_frac", "tiny"])
+        for k, r in enumerate(rows):
+            w.writerow([k] + r)
+
+    print(f"\nsaved {tuple(C.shape)} crop embeddings + {len(rows)} detections "
+          f"({n_tiny} flagged tiny, min_side<{args.min_side}px) to {args.out_dir}")
+
+    # ---- does this actually buy anything? -------------------------------
+    print("\nisotropy (lower cos mean / higher eff-rank is better):")
+    Cn = C.numpy()
+    rep = {"crop": _isotropy_report("crop (per detection)", Cn)}
+    if frame_embs:
+        F = torch.stack(frame_embs).numpy()
+        rep["frame"] = _isotropy_report("frame (per frame)", F)
+    else:
+        fp = os.path.join(args.out_dir, "embeddings.pt")
+        if os.path.exists(fp):
+            F = torch.load(fp, weights_only=True)["embedding"].numpy()
+            rep["frame"] = _isotropy_report("frame (existing file)", F)
+
+    # class separability: do crops of different classes actually differ?
+    cid = np.array([r[2] for r in rows])
+    Cu = Cn / (np.linalg.norm(Cn, axis=1, keepdims=True) + 1e-12)
+    within, between, seen = [], [], [c for c in np.unique(cid) if (cid == c).sum() >= 2]
+    for c in seen[:20]:
+        a = Cu[cid == c][:120]
+        b = Cu[cid != c][np.linspace(0, (cid != c).sum() - 1, min(240, (cid != c).sum())).astype(int)]
+        within.append(float((a @ a.T)[~np.eye(len(a), dtype=bool)].mean()))
+        between.append(float((a @ b.T).mean()))
+    if within:
+        rep["within_class_cos"] = float(np.mean(within))
+        rep["between_class_cos"] = float(np.mean(between))
+        print(f"  within-class cos={np.mean(within):+.3f}  "
+              f"between-class cos={np.mean(between):+.3f}  "
+              f"margin={np.mean(within) - np.mean(between):+.3f}  "
+              f"({len(seen)} classes with >=2 detections)")
+    with open(os.path.join(args.out_dir, "crop_isotropy.json"), "w") as f:
+        json.dump(rep, f, indent=2)
 
 
 # --------------------------------------------------------------------------
@@ -1202,6 +1360,26 @@ def main():
     pe = sub.add_parser("embed", help="YOLOv8n detect + embed every RGB frame")
     pe.add_argument("--stride", type=int, default=1, help="embed every Nth frame")
 
+    pec = sub.add_parser("embed-crops",
+                         help="per-DETECTION appearance features: crop each YOLO box "
+                              "and embed the crop (partial-cue keys)")
+    pec.add_argument("--stride", type=int, default=1, help="process every Nth frame")
+    pec.add_argument("--pad-frac", type=float, default=0.08,
+                     help="expand each box by this fraction of its long side before "
+                          "cropping, to keep a little context (0 = tight box)")
+    pec.add_argument("--min-side", type=float, default=16.0,
+                     help="boxes with a shorter side than this are still embedded but "
+                          "flagged 'tiny' -- their crops are mostly upsampling artefact")
+    pec.add_argument("--crops-name", default="crop_embeddings.pt")
+    pec.add_argument("--repo", default=DATASET)
+    pec.add_argument("--rgb-config", default="rgb_d455",
+                     help="HF config name. NOTE: --out-dir alone does NOT select a "
+                          "sequence -- pass e.g. --rgb-config school_run1_rgb_d455 "
+                          "or this silently re-crops the classroom stream")
+    pec.add_argument("--keep-frame-embed", action="store_true",
+                     help="also embed the whole frame, for a like-for-like isotropy "
+                          "comparison on exactly these frames")
+
     pb = sub.add_parser("build", help="build the three per-axis memories")
     pb.add_argument("--hd-dim", type=int, default=8192)
     pb.add_argument("--seed", type=int, default=0)
@@ -1294,14 +1472,15 @@ def main():
         p.add_argument("--now-name", default="memory_now.pt",
                        help="working-memory snapshot file inside --out-dir")
 
-    for p in (pe, pb, pv, pd, pq, pev, pbn, pqn, pcc):
+    for p in (pe, pec, pb, pv, pd, pq, pev, pbn, pqn, pcc):
         p.add_argument("--out-dir", default=DEFAULT_OUT)
         p.add_argument("--memory-name", default="memory.pt",
                        help="memory file name inside --out-dir (build writes "
                             "it, the query/eval stages read it)")
 
     args = ap.parse_args()
-    {"embed": cmd_embed, "build": cmd_build, "evaluate": cmd_evaluate,
+    {"embed": cmd_embed, "embed-crops": cmd_embed_crops,
+     "build": cmd_build, "evaluate": cmd_evaluate,
      "demo": cmd_demo, "query_class": cmd_query_class,
      "query_event": cmd_query_event, "build_now": cmd_build_now,
      "query_now": cmd_query_now, "compare_clocks": cmd_compare_clocks}[args.cmd](args)

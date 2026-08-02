@@ -1,0 +1,770 @@
+<title>What actually predicts a good VSA key — anisotropy results, 31 July 2026</title>
+<style>
+:root{
+  --bg:#fbfbfc; --bg2:#ffffff; --panel:#eef0f4; --card:#ffffff;
+  --ink:#14171c; --ink2:#39404b; --muted:#646c78; --line:#dce0e7; --line2:#c6ccd6;
+  --accent:#2a5fd9; --accent-soft:#e6ecfb;
+  --good:#0f7a4b; --good-soft:#e2f4ea;
+  --warn:#9a5c05; --warn-soft:#fbeeda;
+  --bad:#b02a24;  --bad-soft:#fbe6e4;
+  --s-enc:#2a5fd9; --s-rung:#9a5c05; --s-scene:#0f7a4b; --s-rep:#b02a24;
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 6px 22px rgba(16,20,28,.07);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0e1116; --bg2:#141922; --panel:#1a212c; --card:#151b24;
+    --ink:#eef2f8; --ink2:#c3ccd9; --muted:#8b95a4; --line:#26303d; --line2:#33404f;
+    --accent:#79a6ff; --accent-soft:#18243a;
+    --good:#54d39a; --good-soft:#10291f;
+    --warn:#f0b24a; --warn-soft:#2b2211;
+    --bad:#ff8078;  --bad-soft:#2c1615;
+    --s-enc:#79a6ff; --s-rung:#f0b24a; --s-scene:#54d39a; --s-rep:#ff8078;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 26px rgba(0,0,0,.34);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1116; --bg2:#141922; --panel:#1a212c; --card:#151b24;
+  --ink:#eef2f8; --ink2:#c3ccd9; --muted:#8b95a4; --line:#26303d; --line2:#33404f;
+  --accent:#79a6ff; --accent-soft:#18243a;
+  --good:#54d39a; --good-soft:#10291f;
+  --warn:#f0b24a; --warn-soft:#2b2211;
+  --bad:#ff8078;  --bad-soft:#2c1615;
+  --s-enc:#79a6ff; --s-rung:#f0b24a; --s-scene:#54d39a; --s-rep:#ff8078;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 26px rgba(0,0,0,.34);
+}
+:root[data-theme="light"]{
+  --bg:#fbfbfc; --bg2:#ffffff; --panel:#eef0f4; --card:#ffffff;
+  --ink:#14171c; --ink2:#39404b; --muted:#646c78; --line:#dce0e7; --line2:#c6ccd6;
+  --accent:#2a5fd9; --accent-soft:#e6ecfb;
+  --good:#0f7a4b; --good-soft:#e2f4ea;
+  --warn:#9a5c05; --warn-soft:#fbeeda;
+  --bad:#b02a24;  --bad-soft:#fbe6e4;
+  --s-enc:#2a5fd9; --s-rung:#9a5c05; --s-scene:#0f7a4b; --s-rep:#b02a24;
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 6px 22px rgba(16,20,28,.07);
+}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.62 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding:0 22px}
+code,.num{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+/* long paths (wiki/analysis/...md) are single unbreakable tokens; without this
+   they push the page body sideways on a narrow screen */
+code{background:var(--panel);border-radius:5px;padding:1px 5px;font-size:.88em;
+  overflow-wrap:anywhere;word-break:break-word}
+
+header{background:var(--bg2);border-bottom:1px solid var(--line);padding:34px 0 30px}
+.topbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:26px}
+.kicker{font-size:.74rem;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);font-weight:700}
+.btn{background:var(--card);color:var(--ink);border:1px solid var(--line2);border-radius:8px;
+  padding:6px 12px;font-size:.82rem;cursor:pointer;font-family:inherit}
+.btn:hover{border-color:var(--accent)}
+h1{font-size:clamp(1.7rem,4.4vw,2.6rem);line-height:1.14;margin:0 0 14px;letter-spacing:-.02em;text-wrap:balance}
+.lede{font-size:1.06rem;color:var(--ink2);max-width:74ch;margin:0 0 8px}
+.statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px;margin-top:26px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:13px 15px}
+.stat b{display:block;font-size:1.32rem;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.stat span{display:block;font-size:.79rem;color:var(--muted);margin-top:3px;line-height:1.38}
+
+section{padding:46px 0;border-bottom:1px solid var(--line)}
+.eyebrow{font-size:.73rem;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 8px}
+h2{font-size:clamp(1.3rem,2.8vw,1.85rem);margin:0 0 14px;letter-spacing:-.015em;text-wrap:balance}
+h3{font-size:1.03rem;margin:26px 0 9px}
+.prose{max-width:74ch;color:var(--ink2)}
+.prose p{margin:0 0 13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:18px;box-shadow:var(--shadow);margin:18px 0}
+figure{margin:0}
+.cap{font-size:.86rem;color:var(--muted);max-width:80ch;margin-top:10px}
+.note{font-size:.85rem;color:var(--muted)}
+
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;width:100%;font-size:.87rem;min-width:620px}
+th,td{padding:8px 11px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal}
+th{font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;
+  border-bottom:1px solid var(--line2)}
+td.n{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+tr.hi td{background:var(--accent-soft)}
+.pill{display:inline-block;font-size:.71rem;font-weight:700;border-radius:999px;padding:2px 9px;letter-spacing:.02em}
+.pill.g{background:var(--good-soft);color:var(--good)}
+.pill.w{background:var(--warn-soft);color:var(--warn)}
+.pill.b{background:var(--bad-soft);color:var(--bad)}
+.pill.a{background:var(--accent-soft);color:var(--accent)}
+
+.callout{border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;
+  padding:14px 17px;margin:18px 0;max-width:80ch}
+.callout.bad{border-left-color:var(--bad);background:var(--bad-soft)}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-soft)}
+.callout p{margin:0 0 8px;color:var(--ink2)}
+.callout p:last-child{margin:0}
+.callout b{color:var(--ink)}
+
+/* every label is authored to sit inside the 900-unit viewBox, so clip rather
+   than letting stray text paint outside and widen the page */
+svg{display:block;width:100%;height:auto;overflow:hidden}
+.ax{stroke:var(--line2);stroke-width:1}
+.gr{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4}
+.tk{fill:var(--muted);font-size:11px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.al{fill:var(--ink2);font-size:12px;font-weight:600}
+.pl{fill:var(--ink);font-size:11.5px}
+.legend{display:flex;flex-wrap:wrap;gap:16px;font-size:.8rem;color:var(--muted);margin-top:12px}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+
+ol.steps{max-width:78ch;color:var(--ink2);padding-left:0;list-style:none;counter-reset:s}
+ol.steps li{counter-increment:s;position:relative;padding-left:44px;margin-bottom:20px}
+ol.steps li::before{content:counter(s);position:absolute;left:0;top:1px;width:28px;height:28px;
+  border-radius:8px;background:var(--accent-soft);color:var(--accent);font-weight:700;
+  font-size:.85rem;display:flex;align-items:center;justify-content:center}
+ol.steps b{color:var(--ink);display:block;margin-bottom:2px}
+.tag{display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--muted);border:1px solid var(--line2);border-radius:5px;padding:1px 6px;margin-left:8px}
+
+footer{padding:34px 0 60px;color:var(--muted);font-size:.87rem}
+footer .wrap{max-width:1080px}
+a{color:var(--accent)}
+@media (max-width:640px){ section{padding:34px 0} }
+</style>
+
+<header>
+  <div class="wrap">
+    <div class="topbar">
+      <span class="kicker">ASTM · anisotropy results · 31 July 2026</span>
+      <button id="themeBtn" class="btn" type="button">Dark / light</button>
+    </div>
+    <h1>Isotropy predicts capacity. It does not predict a good key.</h1>
+    <p class="lede">
+      Four independent experiments run today on Spot data, all measuring the same two things —
+      how anisotropic a representation is, and how well it actually retrieves. They disagree,
+      consistently and in every direction. That dissociation is the result; the rest of this page
+      is the evidence for it, including one hypothesis it falsifies and one claim of my own it
+      retracts.
+    </p>
+    <div class="statgrid">
+      <div class="stat"><b>50,753</b><span>per-object crop embeddings built, across two scenes</span></div>
+      <div class="stat"><b>4</b><span>encoders compared on byte-identical boxes</span></div>
+      <div class="stat"><b>13</b><span>isotropisation rungs, each scored on isotropy <em>and</em> retrieval</span></div>
+      <div class="stat"><b>0</b><span>of the four designs found isotropy predicting retrieval</span></div>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<!-- ============ 1. THE DISSOCIATION ============ -->
+<section id="dissoc">
+  <div class="wrap">
+    <p class="eyebrow">1 · The headline</p>
+    <h2>Every point below is the same measurement. There is no curve through them.</h2>
+    <div class="prose">
+      <p>
+        The x-axis is <b>IsoScore</b> — 0 is maximally anisotropic, 1 is perfectly isotropic, and it
+        is rotation-invariant, so it measures the shape of the covariance spectrum rather than an
+        accident of basis. The y-axis is <b>class-level top-1 retrieval</b>: give the memory one
+        object crop, exclude every neighbour within 300 frames, ask whether the nearest remaining
+        crop is the same class. Chance is 0.312.
+      </p>
+      <p>
+        If isotropy were what made a key good, this would be a rising curve. It is a cloud. The four
+        most isotropic points on the plot (IsoScore = 1.000, fully whitened) sit in the middle of the
+        retrieval range. The best retrieval on the plot belongs to one of the <em>least</em> isotropic
+        representations. The worst belongs to something in between.
+      </p>
+    </div>
+
+    <div class="card">
+      <figure>
+        <svg id="figScatter" viewBox="0 0 900 470" role="img"
+             aria-label="Scatter of IsoScore against top-1 retrieval for encoders, isotropisation rungs, scenes and representations, showing no monotone relationship."></svg>
+      </figure>
+      <div class="legend">
+        <span><i style="background:var(--s-enc)"></i>encoder (same boxes)</span>
+        <span><i style="background:var(--s-rung)"></i>isotropisation rung (same encoder)</span>
+        <span><i style="background:var(--s-scene)"></i>scene</span>
+        <span><i style="background:var(--s-rep)"></i>representation (frame vs crop)</span>
+      </div>
+    </div>
+    <p class="cap">
+      Four experimental designs, one plot. Each varies a different thing — the encoder, the
+      whitening treatment, the environment, the unit of representation — and each produces points
+      that break any monotone reading. Retrieval spans 0.435 to 0.866 while IsoScore spans
+      0.00002 to 1.000, with no alignment between them.
+    </p>
+
+    <div class="callout">
+      <p><b>What this does and does not say.</b> It does not say isotropy is useless. The
+      capacity argument is untouched: bundling crosstalk depends on the covariance spectrum, and
+      that is a claim about how many items you can superpose before readout fails.</p>
+      <p>It says isotropy is <b>not sufficient</b>, and is the wrong thing to optimise on its own.
+      A perfectly isotropic encoding of the wrong referent retrieves nothing. Capacity and key
+      quality are separate axes, and the paper should claim the trade rather than the direction.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 2. ENCODERS ============ -->
+<section id="encoders">
+  <div class="wrap">
+    <p class="eyebrow">2 · Four encoders, identical boxes</p>
+    <h2>The ViT is the best-behaved. The untrained net collapses to one direction.</h2>
+    <div class="prose">
+      <p>
+        Every encoder saw the same 9,056 boxes, read back from the same CSV, so the encoder is the
+        only variable. DINOv2 is preprocessed exactly as the upstream <code>init-am</code> pipeline
+        does it — square bilinear resize to 224, ImageNet normalisation — rather than the
+        HuggingFace processor's shortest-edge resize plus centre crop, which silently slices content
+        off tall boxes.
+      </p>
+    </div>
+
+    <div class="card tw">
+      <table>
+        <thead><tr>
+          <th>encoder</th><th>dim</th><th>mean cos</th><th>eff-rank</th><th>IsoScore</th>
+          <th>top dim %</th><th>dims for 50%</th><th>top-1 @300</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>yolov8n <span class="tag">CNN · detection</span></td><td class="n">256</td><td class="n">+0.883</td><td class="n">6.7</td><td class="n">0.0222</td><td class="n">5.3%</td><td class="n">49</td><td class="n">0.720</td></tr>
+          <tr class="hi"><td>resnet50 <span class="tag">CNN · ImageNet</span></td><td class="n">2048</td><td class="n">+0.332</td><td class="n">23.2</td><td class="n">0.0108</td><td class="n">3.4%</td><td class="n">57</td><td class="n"><b>0.787</b></td></tr>
+          <tr><td>dinov2-S/14 <span class="tag">ViT · self-sup</span></td><td class="n">384</td><td class="n">+0.299</td><td class="n">18.4</td><td class="n"><b>0.0454</b></td><td class="n">2.5%</td><td class="n">46</td><td class="n">0.769</td></tr>
+          <tr><td>resnet50 <b>untrained</b> <span class="tag">CNN · random init</span></td><td class="n">2048</td><td class="n"><b>+0.999</b></td><td class="n"><b>1.0</b></td><td class="n">0.00002</td><td class="n">1.3%</td><td class="n">185</td><td class="n">0.578</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Liang et al. (NeurIPS 2022) replicates to three decimals <span class="pill g">confirmed</span></h3>
+    <div class="prose">
+      <p>
+        Liang reports that <em>untrained</em> networks already show the cone effect, with random-init
+        ResNet around 0.99 mean pairwise cosine. Measured here: <b>+0.999</b>, with an effective rank
+        of <b>1.0 out of 2048</b> — the entire representation collapsed onto a single direction.
+        Training then <em>reduces</em> anisotropy dramatically, 0.999 down to 0.332.
+        Extreme anisotropy is the architectural default, not something training creates.
+      </p>
+    </div>
+
+    <h3>Godey et al. (EACL 2024) does not hold here — it inverts <span class="pill b">contradicted</span></h3>
+    <div class="prose">
+      <p>
+        Godey reports that anisotropy tracks self-attention: ViTs and transformers are anisotropic at
+        every layer, CNNs largely are not. In this setting the <b>ViT is the best-behaved trained
+        encoder</b> (IsoScore 0.0454, the highest here) and the <b>most anisotropic trained encoder is
+        a CNN</b> — YOLOv8n at 0.883.
+      </p>
+      <p>
+        What predicts anisotropy in this table is the <b>training objective</b>, not the
+        architecture. YOLO's "embedding" is a detection head's penultimate feature that was never
+        asked to be a descriptor; ResNet-50 and DINOv2 both optimise global discriminative
+        representations. That is a testable reframing, and it is the opposite of the prediction.
+      </p>
+    </div>
+
+    <div class="callout warn">
+      <p><b>This costs us something, and it should be said first in the paper.</b> A better backbone
+      buys better isotropy <em>and</em> better retrieval together. So "why not just use a good
+      encoder instead of whitening?" is now an obvious reviewer question.</p>
+      <p>The <code>365×</code> and <code>22×</code> crosstalk figures were measured on <b>YOLO
+      features — the worst encoder in this table</b>, which inflates the apparent value of whitening
+      relative to a competent descriptor. Re-measure on DINOv2 before quoting any multiplier. What
+      survives: even the best encoder here sits at IsoScore 0.045 against 1.0, so the correction
+      still matters — but its magnitude is encoder-dependent and has to be reported that way.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3. TIMKEY ============ -->
+<section id="timkey">
+  <div class="wrap">
+    <p class="eyebrow">3 · The rogue-dimension test</p>
+    <h2>This is not the anisotropy the NLP literature describes</h2>
+    <div class="prose">
+      <p>
+        Timkey &amp; van Schijndel (EMNLP 2021) showed transformer anisotropy is mostly the work of
+        one to five <em>rogue dimensions</em>: remove five and the mean cosine collapses, and the
+        cheapest effective fix is per-dimension standardisation. If our features behaved the same
+        way, the story would be "known anisotropy, applied to VSAs" — and the fix would be free.
+      </p>
+      <p>
+        The decomposition is exact rather than sampled. With unit-normalised vectors, each dimension's
+        additive contribution to the mean off-diagonal cosine has a closed form, and the
+        contributions sum to the measured mean.
+      </p>
+    </div>
+
+    <div class="card">
+      <figure>
+        <svg id="figTimkey" viewBox="0 0 900 400" role="img"
+             aria-label="Cumulative share of mean cosine against number of dimensions, showing our features need 46 to 185 dimensions for half the mean cosine while GPT-2, BERT and XLNet need about one."></svg>
+      </figure>
+    </div>
+    <p class="cap">
+      Cumulative share of the mean off-diagonal cosine, by dimensions ranked most-contributing first.
+      The NLP markers are single dimensions carrying 76–99% of the effect. Every vision encoder tested
+      here — CNN, ViT, trained and untrained — needs <b>46 to 185 dimensions</b> to reach half.
+    </p>
+
+    <div class="callout">
+      <p><b>The untrained network is the cleanest separation of the two phenomena.</b> It has an
+      effective rank of <b>1.0</b> — maximally low-rank, everything on one direction — while its top
+      <em>coordinate</em> carries only <b>1.3%</b> of the mean cosine, and it needs 185 dimensions to
+      reach half.</p>
+      <p>A dense shared <em>direction</em> is not a coordinate-aligned spike. Deleting dimensions
+      cannot fix it, which is exactly why Timkey's cheap fix does not transfer, and why the
+      effective-rank framing is the one that applies.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4. THE LADDER ============ -->
+<section id="ladder">
+  <div class="wrap">
+    <p class="eyebrow">4 · The isotropisation ladder</p>
+    <h2>Whitening buys isotropy by spending discriminability</h2>
+    <div class="prose">
+      <p>
+        Thirteen rungs on one encoder's crops, each scored on both axes. Centring alone collapses the
+        mean cosine from 0.883 to 0.007 at essentially no retrieval cost — most of the raw figure is a
+        shared mean offset, and it is free to remove. What centring does <em>not</em> touch is the
+        spectrum: effective rank stays at 6.7. That is the part that costs.
+      </p>
+    </div>
+
+    <div class="card">
+      <figure>
+        <svg id="figLadder" viewBox="0 0 900 380" role="img"
+             aria-label="Retrieval falls monotonically as more principal components are whitened: 0.720 raw, 0.693 at 32 components, 0.654 at 64, 0.623 at 128, 0.592 for full ZCA."></svg>
+      </figure>
+    </div>
+    <p class="cap">
+      All four whitened rungs reach IsoScore 1.000 by construction. They differ only in how many
+      directions get equalised — and retrieval falls monotonically with that count, because the extra
+      directions being promoted to equal footing are nuisance rather than signal.
+    </p>
+
+    <div class="prose">
+      <p>
+        <b>The control rung works.</b> A random orthogonal map cannot change any cosine, and it
+        reproduces raw exactly on every rotation-invariant metric — mean cosine, effective rank and
+        IsoScore all identical to twelve decimal places. The implementation is sound.
+      </p>
+      <p>
+        <b>Per-dimension z-scoring is the best rung on this axis</b> for the anisotropic encoder: it
+        nearly doubles IsoScore, lifts effective rank from 6.7 to 10.9, and slightly <em>improves</em>
+        retrieval. It only helps where there is something to fix, though — on ResNet-50 it costs
+        0.787 → 0.772.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 5. TWO SCENES ============ -->
+<section id="scenes">
+  <div class="wrap">
+    <p class="eyebrow">5 · The second scene</p>
+    <h2>A falsified hypothesis, and a retraction</h2>
+    <div class="prose">
+      <p>
+        <code>school_run1</code> is the scale-up sequence: <b>41,697 detections over 11,211 frames</b>,
+        9.3× the classroom's canonical event count. Same robot, same camera, same detector, different
+        space — which makes it the free test of whether semantic diversity drives effective rank.
+        Diversity is measured, not assumed: class entropy and its exponential, the effective number
+        of classes.
+      </p>
+    </div>
+
+    <div class="card tw">
+      <table>
+        <thead><tr>
+          <th>scene</th><th>n</th><th>mean cos</th><th>eff-rank</th><th>IsoScore</th>
+          <th>eff. classes</th><th>top-1</th><th>+ whiten 128</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>classroom</td><td class="n">9,056</td><td class="n">+0.883</td><td class="n"><b>6.7</b></td><td class="n"><b>0.0222</b></td><td class="n">6.0</td><td class="n">0.720</td><td class="n"><b>0.623</b></td></tr>
+          <tr class="hi"><td>school_run1 <span class="tag">matched N</span></td><td class="n">9,056</td><td class="n">+0.868</td><td class="n"><b>4.6</b></td><td class="n"><b>0.0139</b></td><td class="n">7.0</td><td class="n">0.854</td><td class="n">0.852</td></tr>
+          <tr><td>school_run1 <span class="tag">full</span></td><td class="n">41,697</td><td class="n">+0.868</td><td class="n">4.6</td><td class="n">0.0141</td><td class="n">7.1</td><td class="n">0.866</td><td class="n">0.863</td></tr>
+          <tr><td>school_run1 <span class="tag">full · gap 1357</span></td><td class="n">41,697</td><td class="n">+0.868</td><td class="n">4.6</td><td class="n">0.0141</td><td class="n">7.1</td><td class="n">0.842</td><td class="n">0.838</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>The prediction ran backwards <span class="pill b">falsified</span></h3>
+    <div class="prose">
+      <p>
+        The hypothesis was that our anisotropy is <em>low-rank because few classes</em>, so a
+        semantically richer scene should spread features over more directions.
+        <code>school_run1</code> is measurably richer — <b>7.1 effective classes against 6.0</b>, 45
+        distinct classes against 40 — and its effective rank is <b>lower</b> (4.6 against 6.7), with
+        IsoScore lower too.
+      </p>
+      <p>
+        The characterisation survives: it is still spectral, and the Timkey figure is unchanged at 52
+        dimensions for half the mean cosine. What fails is the <em>causal story</em>. Class diversity
+        does not drive effective rank, at least not in the predicted direction, so that mechanism
+        cannot be asserted.
+      </p>
+    </div>
+
+    <div class="callout bad">
+      <p><b>Retraction.</b> Earlier today I reported, from the classroom alone, that PCA whitening
+      hurts appearance retrieval — 0.720 → 0.623, a 0.097 drop. On <code>school_run1</code> the same
+      operation costs <b>0.004</b> (0.842 → 0.838).</p>
+      <p>The whitening penalty is <b>scene-dependent, not a property of appearance keys</b>. The
+      recommendation that followed from it — cutting the language pipeline from 128 PCA components to
+      32 — is therefore provisional and classroom-specific. It must be re-tested per scene before
+      being adopted as a default.</p>
+    </div>
+
+    <div class="prose">
+      <p>
+        <b>The obvious confound was checked and rejected.</b> A 300-frame gap is 12% of the
+        classroom's 2,478 frames but only 2.7% of school_run1's 11,211, which would make the raw
+        comparison unfair. Re-run at a proportionally matched <b>1,357-frame</b> gap, school_run1
+        still scores 0.842 against the classroom's 0.720. The matched-N row controls separately for
+        sample size, since both effective rank and IsoScore move with it.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 6. CROPS ============ -->
+<section id="crops">
+  <div class="wrap">
+    <p class="eyebrow">6 · The enabling change</p>
+    <h2>Per-object crops, and why the frame embedding could never have worked</h2>
+    <div class="prose">
+      <p>
+        Until today the pipeline called <code>model.embed(img)</code> once per <em>frame</em>, so every
+        detection in a frame shared one vector. That gap is upstream's too, not a porting artefact —
+        <code>init-am</code>'s DINO path embeds whole frames as well, so its YOLO-versus-DINO
+        comparison has been running on the weaker representation for both backends.
+      </p>
+    </div>
+
+    <div class="card">
+      <figure>
+        <svg id="figCrops" viewBox="0 0 900 330" role="img"
+             aria-label="Crop embeddings beat frame embeddings at every temporal gap: 0.879 versus 0.520 at 30 frames, 0.720 versus 0.435 at 300, 0.691 versus 0.455 at 900."></svg>
+      </figure>
+    </div>
+    <p class="cap">
+      Identical detections, identical labels, identical gap control — the only change is which vector
+      represents a detection. Crops carry <b>3.4× the signal above chance</b> at a twenty-second gap.
+    </p>
+
+    <div class="callout">
+      <p><b>The structural reason, quantified.</b> 877 of 1,210 frames contain more than one
+      <em>distinct class</em>, which puts <b>88.6% of all detections</b> in a frame where the vector is
+      identical across different objects.</p>
+      <p>For those, per-object cueing is not inaccurate — it is impossible in principle. And note that
+      frame features are <em>more</em> isotropic than crops (IsoScore 0.0315 against 0.0222) while
+      retrieving far worse. That is the same dissociation again, from a fourth direction.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 7. NEXT ============ -->
+<section id="next">
+  <div class="wrap">
+    <p class="eyebrow">7 · Next steps</p>
+    <h2>What these results change, in order</h2>
+    <ol class="steps">
+      <li>
+        <b>Re-measure crosstalk on DINOv2 features before quoting any multiplier.</b>
+        Every whitening figure in the project — 365×, 22×, 4.6× — was measured on YOLO features,
+        which this page shows is the worst encoder available. The multiplier is encoder-dependent, and
+        publishing one measured on the weakest backbone is the kind of thing a reviewer with
+        <code>pip</code> finds in an hour. This is cheap: the DINOv2 crops already exist.
+      </li>
+      <li>
+        <b>Define the crosstalk metric once, precisely.</b> Mean cosine and IsoScore
+        <em>rank the encoders differently</em> — cosine says YOLO is worst, IsoScore says ResNet-50 is —
+        and retrieval disagrees with both. Until the paper names which quantity its headline number
+        refers to, the headline number does not mean anything. This also permanently resolves the
+        22×-versus-13× ambiguity.
+      </li>
+      <li>
+        <b>Make the dissociation a figure, not a caveat.</b> Four independent designs now show it.
+        It pre-empts the obvious objection to the capacity story ("if isotropy is so good, why not
+        maximise it?") with data rather than argument, and it sharpens the contribution from a
+        direction into a trade-off with an optimum — which is territory the Hazy Research
+        fact-storing result does not occupy, because a storage-only setting has no competing
+        retrieval objective to expose.
+      </li>
+      <li>
+        <b>Run Gate 0 on <code>school_run1</code>, not the classroom.</b> At 41,697 detections it is
+        roughly 3× the ~13k PQ-kNN crossover, making it the first regime where the byte-budget claim
+        can be tested rather than assumed. The classroom sits below crossover, where the honest
+        answer is already "the exact table wins."
+      </li>
+      <li>
+        <b>Reconcile the event count before any figure is redrawn.</b> Stride-1 crop extraction gives
+        9,056 detections where the canonical pipeline reports 4,498, largely because upstream applies
+        <code>--trim-stationary</code>. N appears in every crosstalk and crossover number, so which
+        one the paper quotes moves the exact-table crossover.
+      </li>
+      <li>
+        <b>Do not act on the 128 → 32 whitening change yet.</b> It held on the classroom and vanished
+        on school_run1. Re-test per scene first.
+      </li>
+    </ol>
+
+    <div class="callout warn">
+      <p><b>Still unmeasured, and load-bearing.</b> Every retrieval number on this page is raw cosine
+      retrieval, <em>not</em> retrieval through the VSA memory — and inside the memory, isotropy is
+      what buys the crosstalk reduction. The net trade has not been measured.</p>
+      <p>Everything here is also <b>class-level</b>. Neither sequence has instance ground truth, so
+      the five-identical-chairs case — the named losing scenario against a kNN vector database —
+      remains untested.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>
+      Reproduce: <code>vsa_cognitive_mapping/classroom_pipeline.py embed-crops</code> (per-detection
+      features), <code>isotropy_ladder.py</code> (rungs + the Timkey decomposition),
+      <code>encoder_comparison.py</code> and <code>encoder_report.py</code> (the four-way),
+      <code>room_diversity.py</code> (two scenes). Data is
+      <code>lorinachey/spot-telluride-workshop-dataset</code> on HuggingFace — the Telluride workshop
+      capture, configs <code>rgb_d455</code> and <code>school_run1_rgb_d455</code>.
+    </p>
+    <p class="note">
+      All figures were produced on a CPU-only machine (torch 2.8.0+cpu, no CUDA), which is worth
+      knowing for the latency story: a DINOv2 forward pass costs 33&nbsp;ms per crop here, while a VSA
+      query costs 3–10&nbsp;ms. Perception is the bottleneck, not the memory. Numbers on this page are
+      read from <code>encoder_report.json</code>, <code>isotropy_ladder.json</code>,
+      <code>crop_isotropy.json</code> and <code>room_diversity_*.json</code> rather than transcribed.
+      Full detail, including caveats not repeated here, is in tracker entries (x) through (ab) of
+      <code>wiki/analysis/2026-07-29-vsa-query-layer-paper-plan.md</code>.
+    </p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  function el(t, a) { var e = document.createElementNS(NS, t); for (var k in a) e.setAttribute(k, a[k]); return e; }
+  function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+  var redraws = [];
+
+  /* ---------- FIGURE 1: the dissociation scatter ---------- */
+  var PTS = [
+    { x: 0.0000163, y: 0.578, l: "resnet50 untrained", g: "enc", dx: 8, dy: 4 },
+    { x: 0.0108,    y: 0.787, l: "resnet50",           g: "enc", dx: -6, dy: -12, an: "end" },
+    { x: 0.0454,    y: 0.769, l: "dinov2-S/14",        g: "enc", dx: 9, dy: -8 },
+    { x: 0.0222,    y: 0.720, l: "yolov8n (raw)",      g: "enc", dx: 9, dy: 14 },
+    { x: 0.0388,    y: 0.722, l: "z-scored",           g: "rung", dx: 9, dy: -6 },
+    { x: 1.0,       y: 0.693, l: "whiten 32",          g: "rung", dx: -8, dy: -6, an: "end" },
+    { x: 1.0,       y: 0.654, l: "whiten 64",          g: "rung", dx: -8, dy: 4, an: "end" },
+    { x: 1.0,       y: 0.623, l: "whiten 128",         g: "rung", dx: -8, dy: 4, an: "end" },
+    { x: 1.0,       y: 0.592, l: "ZCA (full)",         g: "rung", dx: -8, dy: 14, an: "end" },
+    { x: 0.0141,    y: 0.866, l: "school_run1 crops",  g: "scene", dx: 9, dy: -6 },
+    { x: 0.0315,    y: 0.435, l: "frame embedding",    g: "rep", dx: 9, dy: 4 }
+  ];
+  var GC = { enc: "--s-enc", rung: "--s-rung", scene: "--s-scene", rep: "--s-rep" };
+
+  function drawScatter() {
+    var svg = document.getElementById("figScatter");
+    svg.textContent = "";
+    var W = 900, H = 470, L = 66, R = 24, T = 18, B = 54;
+    var lo = Math.log10(1e-5), hi = Math.log10(1.6);
+    var X = function (v) { return L + (Math.log10(Math.max(v, 1e-5)) - lo) / (hi - lo) * (W - L - R); };
+    var Y = function (v) { return H - B - (v - 0.38) / (0.92 - 0.38) * (H - T - B); };
+
+    [0.4, 0.5, 0.6, 0.7, 0.8, 0.9].forEach(function (v) {
+      svg.appendChild(el("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v), class: "gr" }));
+      var t = el("text", { x: L - 9, y: Y(v) + 4, class: "tk", "text-anchor": "end" });
+      t.textContent = v.toFixed(1); svg.appendChild(t);
+    });
+    [-5, -4, -3, -2, -1, 0].forEach(function (e) {
+      var v = Math.pow(10, e);
+      svg.appendChild(el("line", { x1: X(v), x2: X(v), y1: T, y2: H - B, class: "gr" }));
+      var t = el("text", { x: X(v), y: H - B + 19, class: "tk", "text-anchor": "middle" });
+      t.textContent = e === 0 ? "1" : "1e" + e; svg.appendChild(t);
+    });
+    svg.appendChild(el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, class: "ax" }));
+    svg.appendChild(el("line", { x1: L, x2: L, y1: T, y2: H - B, class: "ax" }));
+
+    /* chance floor */
+    var ch = el("line", { x1: L, x2: W - R, y1: Y(0.312), y2: Y(0.312),
+                          stroke: css("--muted"), "stroke-width": 1, "stroke-dasharray": "6 5" });
+    if (Y(0.312) < H - B) svg.appendChild(ch);
+
+    var xl = el("text", { x: (L + W - R) / 2, y: H - 12, class: "al", "text-anchor": "middle" });
+    xl.textContent = "IsoScore  (log scale) →  more isotropic"; svg.appendChild(xl);
+    var yl = el("text", { x: 16, y: (T + H - B) / 2, class: "al", "text-anchor": "middle",
+                          transform: "rotate(-90 16 " + ((T + H - B) / 2) + ")" });
+    yl.textContent = "class top-1 retrieval  (gap 300)"; svg.appendChild(yl);
+
+    PTS.forEach(function (p) {
+      var c = css(GC[p.g]);
+      svg.appendChild(el("circle", { cx: X(p.x), cy: Y(p.y), r: 6.5, fill: c,
+                                     stroke: css("--card"), "stroke-width": 2 }));
+      var t = el("text", { x: X(p.x) + p.dx, y: Y(p.y) + p.dy, class: "pl",
+                           "text-anchor": p.an || "start" });
+      t.textContent = p.l; svg.appendChild(t);
+    });
+  }
+  redraws.push(drawScatter);
+
+  /* ---------- FIGURE 2: Timkey cumulative ---------- */
+  var TK = {
+    crops:  { 1: .0532, 3: .1289, 5: .1840, 10: .2353, 20: .3122, 50: .5119 },
+    frames: { 1: .0505, 3: .1058, 5: .1488, 10: .1987, 20: .2800, 50: .4874 }
+  };
+  function drawTimkey() {
+    var svg = document.getElementById("figTimkey");
+    svg.textContent = "";
+    var W = 900, H = 400, L = 62, R = 150, T = 18, B = 52;
+    var lo = 0, hi = Math.log10(60);
+    var X = function (v) { return L + (Math.log10(Math.max(v, 1)) - lo) / (hi - lo) * (W - L - R); };
+    var Y = function (v) { return H - B - v * (H - T - B); };
+
+    [0, .25, .5, .75, 1].forEach(function (v) {
+      svg.appendChild(el("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v), class: "gr" }));
+      var t = el("text", { x: L - 9, y: Y(v) + 4, class: "tk", "text-anchor": "end" });
+      t.textContent = Math.round(v * 100) + "%"; svg.appendChild(t);
+    });
+    [1, 3, 5, 10, 20, 50].forEach(function (v) {
+      var t = el("text", { x: X(v), y: H - B + 19, class: "tk", "text-anchor": "middle" });
+      t.textContent = v; svg.appendChild(t);
+    });
+    svg.appendChild(el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, class: "ax" }));
+    svg.appendChild(el("line", { x1: L, x2: L, y1: T, y2: H - B, class: "ax" }));
+    var xl = el("text", { x: (L + W - R) / 2, y: H - 12, class: "al", "text-anchor": "middle" });
+    xl.textContent = "number of dimensions (ranked most-contributing first, log)"; svg.appendChild(xl);
+
+    /* NLP reference band: one dimension carries 76-99% */
+    svg.appendChild(el("rect", { x: X(1) - 7, y: Y(0.99), width: 14, height: Y(0.76) - Y(0.99),
+                                 fill: css("--bad"), opacity: .22, rx: 3 }));
+    var nt = el("text", { x: X(1) + 14, y: Y(0.88), class: "pl", fill: css("--bad") });
+    nt.textContent = "GPT-2 / BERT / XLNet: 1 dim = 76–99%"; svg.appendChild(nt);
+
+    [["crops", "--accent", "our crops (per detection)"],
+     ["frames", "--warn", "our frames (per frame)"]].forEach(function (s) {
+      var key = s[0], col = css(s[1]);
+      var d = "", first = true;
+      [1, 3, 5, 10, 20, 50].forEach(function (k) {
+        d += (first ? "M" : "L") + X(k) + " " + Y(TK[key][k]); first = false;
+      });
+      svg.appendChild(el("path", { d: d, fill: "none", stroke: col, "stroke-width": 2.4,
+                                   "stroke-linejoin": "round" }));
+      [1, 3, 5, 10, 20, 50].forEach(function (k) {
+        svg.appendChild(el("circle", { cx: X(k), cy: Y(TK[key][k]), r: 4, fill: col }));
+      });
+      var t = el("text", { x: X(50) + 10, y: Y(TK[key][50]) + 4, class: "pl", fill: col });
+      t.textContent = s[2]; svg.appendChild(t);
+    });
+
+    var half = el("line", { x1: L, x2: W - R, y1: Y(0.5), y2: Y(0.5),
+                            stroke: css("--muted"), "stroke-width": 1, "stroke-dasharray": "6 5" });
+    svg.appendChild(half);
+    var ht = el("text", { x: L + 8, y: Y(0.5) - 7, class: "tk" });
+    ht.textContent = "half the mean cosine"; svg.appendChild(ht);
+  }
+  redraws.push(drawTimkey);
+
+  /* ---------- FIGURE 3: whitening ladder ---------- */
+  var LAD = [
+    { l: "raw", k: 0, y: 0.720, iso: "0.022" },
+    { l: "z-scored", k: 0, y: 0.722, iso: "0.039" },
+    { l: "whiten 32", k: 32, y: 0.693, iso: "1.000" },
+    { l: "whiten 64", k: 64, y: 0.654, iso: "1.000" },
+    { l: "whiten 128", k: 128, y: 0.623, iso: "1.000" },
+    { l: "ZCA 256", k: 256, y: 0.592, iso: "1.000" }
+  ];
+  function drawLadder() {
+    var svg = document.getElementById("figLadder");
+    svg.textContent = "";
+    var W = 900, H = 380, L = 66, R = 24, T = 20, B = 76;
+    var n = LAD.length, bw = (W - L - R) / n;
+    var Y = function (v) { return H - B - (v - 0.55) / (0.78 - 0.55) * (H - T - B); };
+
+    [0.55, 0.60, 0.65, 0.70, 0.75].forEach(function (v) {
+      svg.appendChild(el("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v), class: "gr" }));
+      var t = el("text", { x: L - 9, y: Y(v) + 4, class: "tk", "text-anchor": "end" });
+      t.textContent = v.toFixed(2); svg.appendChild(t);
+    });
+    svg.appendChild(el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, class: "ax" }));
+
+    LAD.forEach(function (d, i) {
+      var cx = L + bw * (i + 0.5);
+      var col = d.iso === "1.000" ? css("--warn") : css("--accent");
+      var h = (H - B) - Y(d.y);
+      svg.appendChild(el("rect", { x: cx - bw * 0.3, y: Y(d.y), width: bw * 0.6, height: h,
+                                   fill: col, opacity: .82, rx: 4 }));
+      var v = el("text", { x: cx, y: Y(d.y) - 8, class: "pl", "text-anchor": "middle" });
+      v.textContent = d.y.toFixed(3); svg.appendChild(v);
+      var t = el("text", { x: cx, y: H - B + 20, class: "tk", "text-anchor": "middle" });
+      t.textContent = d.l; svg.appendChild(t);
+      var s = el("text", { x: cx, y: H - B + 36, class: "tk", "text-anchor": "middle", opacity: .8 });
+      s.textContent = "Iso " + d.iso; svg.appendChild(s);
+    });
+    var yl = el("text", { x: 16, y: (T + H - B) / 2, class: "al", "text-anchor": "middle",
+                          transform: "rotate(-90 16 " + ((T + H - B) / 2) + ")" });
+    yl.textContent = "top-1 retrieval (gap 300)"; svg.appendChild(yl);
+    var note = el("text", { x: (L + W - R) / 2, y: H - 12, class: "al", "text-anchor": "middle" });
+    note.textContent = "orange = IsoScore 1.000 by construction; only the count of equalised directions differs";
+    svg.appendChild(note);
+  }
+  redraws.push(drawLadder);
+
+  /* ---------- FIGURE 4: crops vs frames ---------- */
+  var CF = [{ g: "30 frames  (~2 s)", c: 0.879, f: 0.520 },
+            { g: "300 frames (~20 s)", c: 0.720, f: 0.435 },
+            { g: "900 frames (~60 s)", c: 0.691, f: 0.455 }];
+  function drawCrops() {
+    var svg = document.getElementById("figCrops");
+    svg.textContent = "";
+    var W = 900, H = 330, L = 66, R = 24, T = 20, B = 62;
+    var n = CF.length, gw = (W - L - R) / n;
+    var Y = function (v) { return H - B - v / 0.95 * (H - T - B); };
+
+    [0, .2, .4, .6, .8].forEach(function (v) {
+      svg.appendChild(el("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v), class: "gr" }));
+      var t = el("text", { x: L - 9, y: Y(v) + 4, class: "tk", "text-anchor": "end" });
+      t.textContent = v.toFixed(1); svg.appendChild(t);
+    });
+    var ch = el("line", { x1: L, x2: W - R, y1: Y(0.312), y2: Y(0.312),
+                          stroke: css("--muted"), "stroke-width": 1.2, "stroke-dasharray": "6 5" });
+    svg.appendChild(ch);
+    var ct = el("text", { x: W - R - 4, y: Y(0.312) - 7, class: "tk", "text-anchor": "end" });
+    ct.textContent = "chance 0.312"; svg.appendChild(ct);
+    svg.appendChild(el("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, class: "ax" }));
+
+    CF.forEach(function (d, i) {
+      var x0 = L + gw * i + gw * 0.5;
+      [[d.c, "--accent", -1, "crop"], [d.f, "--bad", 1, "frame"]].forEach(function (s) {
+        var bw = gw * 0.22, cx = x0 + s[2] * bw * 0.62;
+        svg.appendChild(el("rect", { x: cx - bw / 2, y: Y(s[0]), width: bw,
+                                     height: (H - B) - Y(s[0]), fill: css(s[1]), opacity: .85, rx: 4 }));
+        var v = el("text", { x: cx, y: Y(s[0]) - 8, class: "pl", "text-anchor": "middle" });
+        v.textContent = s[0].toFixed(3); svg.appendChild(v);
+      });
+      var t = el("text", { x: x0, y: H - B + 21, class: "tk", "text-anchor": "middle" });
+      t.textContent = d.g; svg.appendChild(t);
+    });
+    var lg = el("text", { x: (L + W - R) / 2, y: H - 14, class: "al", "text-anchor": "middle" });
+    lg.textContent = "blue = per-object crop embedding    ·    red = per-frame embedding";
+    svg.appendChild(lg);
+  }
+  redraws.push(drawCrops);
+
+  function drawAll() { redraws.forEach(function (f) { try { f(); } catch (e) {} }); }
+  drawAll();
+  window.addEventListener("resize", drawAll);
+
+  var btn = document.getElementById("themeBtn");
+  btn.addEventListener("click", function () {
+    var cur = document.documentElement.getAttribute("data-theme");
+    if (!cur) cur = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+    drawAll();
+  });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawAll);
+})();
+</script>

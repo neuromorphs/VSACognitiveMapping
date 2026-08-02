@@ -1,0 +1,610 @@
+<meta charset="utf-8">
+<title>__TITLE__</title>
+<style>
+:root{
+  --bg:#fbfbfc; --bg2:#ffffff; --panel:#eef0f4; --card:#ffffff;
+  --ink:#14171c; --ink2:#39404b; --muted:#646c78; --line:#dce0e7; --line2:#c6ccd6;
+  --accent:#2a5fd9; --accent-soft:#e6ecfb;
+  --good:#0f7a4b; --good-soft:#e2f4ea;
+  --bad:#b02a24;  --bad-soft:#fbe6e4;
+  --c-truth:#ffffff; --c-peak:#ff2f6d; --c-path:#9aa4b2; --halo:rgba(0,0,0,.62);
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 6px 22px rgba(16,20,28,.07);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0e1116; --bg2:#141922; --panel:#1a212c; --card:#151b24;
+    --ink:#eef2f8; --ink2:#c3ccd9; --muted:#8b95a4; --line:#26303d; --line2:#33404f;
+    --accent:#79a6ff; --accent-soft:#18243a;
+    --good:#54d39a; --good-soft:#10291f;
+    --bad:#ff8078;  --bad-soft:#2c1615;
+    --c-peak:#ff4d7e; --halo:rgba(0,0,0,.7);
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 26px rgba(0,0,0,.34);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1116; --bg2:#141922; --panel:#1a212c; --card:#151b24;
+  --ink:#eef2f8; --ink2:#c3ccd9; --muted:#8b95a4; --line:#26303d; --line2:#33404f;
+  --accent:#79a6ff; --accent-soft:#18243a;
+  --good:#54d39a; --good-soft:#10291f;
+  --bad:#ff8078;  --bad-soft:#2c1615;
+  --c-peak:#ff4d7e; --halo:rgba(0,0,0,.7);
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 26px rgba(0,0,0,.34);
+}
+:root[data-theme="light"]{
+  --bg:#fbfbfc; --bg2:#ffffff; --panel:#eef0f4; --card:#ffffff;
+  --ink:#14171c; --ink2:#39404b; --muted:#646c78; --line:#dce0e7; --line2:#c6ccd6;
+  --accent:#2a5fd9; --accent-soft:#e6ecfb;
+  --good:#0f7a4b; --good-soft:#e2f4ea;
+  --bad:#b02a24;  --bad-soft:#fbe6e4;
+  --c-peak:#ff2f6d; --halo:rgba(0,0,0,.62);
+  --shadow:0 1px 2px rgba(16,20,28,.06), 0 6px 22px rgba(16,20,28,.07);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1120px;margin:0 auto;padding:0 22px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--panel);
+  border-radius:5px;padding:1px 5px;font-size:.88em;overflow-wrap:anywhere}
+header{background:var(--bg2);border-bottom:1px solid var(--line);padding:32px 0 28px}
+.topbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:22px}
+.kicker{font-size:.74rem;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);font-weight:700}
+.btn{background:var(--card);color:var(--ink);border:1px solid var(--line2);border-radius:8px;
+  padding:7px 13px;font-size:.85rem;cursor:pointer;font-family:inherit}
+.btn:hover{border-color:var(--accent)}
+.btn.wide{min-width:104px;font-weight:650}
+h1{font-size:clamp(1.6rem,4vw,2.35rem);line-height:1.15;margin:0 0 12px;letter-spacing:-.02em;text-wrap:balance}
+.lede{font-size:1.03rem;color:var(--ink2);max-width:76ch;margin:0}
+.statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:24px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:12px 14px}
+.stat b{display:block;font-size:1.28rem;font-variant-numeric:tabular-nums}
+.stat span{display:block;font-size:.78rem;color:var(--muted);margin-top:3px;line-height:1.35}
+section{padding:42px 0;border-bottom:1px solid var(--line)}
+.eyebrow{font-size:.73rem;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 8px}
+h2{font-size:clamp(1.25rem,2.6vw,1.75rem);margin:0 0 12px;letter-spacing:-.015em;text-wrap:balance}
+h3{font-size:.94rem;margin:0 0 8px;color:var(--ink2)}
+.prose{max-width:76ch;color:var(--ink2)}
+.prose p{margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:16px;box-shadow:var(--shadow);margin:16px 0}
+.player{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:820px){ .player{grid-template-columns:1fr} }
+.pane canvas{width:100%;height:auto;display:block;border-radius:9px;background:var(--panel);
+  border:1px solid var(--line)}
+.ctrl{display:flex;gap:11px;align-items:center;margin-top:14px;flex-wrap:wrap}
+input[type=range]{flex:1;min-width:150px;accent-color:var(--accent)}
+.legend{display:flex;flex-wrap:wrap;gap:13px;font-size:.79rem;color:var(--muted);margin-top:9px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px;
+  border:1px solid var(--line2)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 12px}
+.chip{background:var(--card);border:1px solid var(--line2);border-radius:999px;padding:5px 13px;
+  font-size:.83rem;cursor:pointer;font-family:inherit;color:var(--ink)}
+.chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:650}
+dl.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;margin:12px 0 0;font-size:.87rem}
+dl.kv dt{color:var(--muted)}
+dl.kv dd{margin:0;font-family:ui-monospace,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.note{font-size:.85rem;color:var(--muted)}
+kbd{background:var(--panel);border:1px solid var(--line2);border-bottom-width:2px;border-radius:5px;
+  padding:0 5px;font-size:.8em;font-family:ui-monospace,Menlo,Consolas,monospace}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.87rem;min-width:560px}
+th,td{padding:8px 11px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{font-size:.71rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700;
+  border-bottom:1px solid var(--line2)}
+td.n{font-family:ui-monospace,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.cmp{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center}
+@media (max-width:700px){ .cmp{grid-template-columns:1fr} }
+.qbox{text-align:center}
+.qbox img{width:132px;height:132px;object-fit:cover;border-radius:10px;border:2px solid var(--accent);display:block}
+.rrow{display:flex;gap:12px;flex-wrap:wrap}
+.rcell{text-align:center;font-size:.76rem;color:var(--muted);width:112px}
+.rcell img{width:112px;height:112px;object-fit:cover;border-radius:9px;display:block;border:2px solid var(--line2)}
+.rcell.ok img{border-color:var(--good)}
+.rcell.no img{border-color:var(--bad)}
+.rcell b{display:block;color:var(--ink);font-size:.8rem;margin-top:5px}
+.rcell .v{font-family:ui-monospace,Menlo,Consolas,monospace}
+.tag{display:inline-block;font-size:.68rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--muted);border:1px solid var(--line2);border-radius:5px;padding:1px 5px}
+footer{padding:32px 0 60px;color:var(--muted);font-size:.86rem}
+a{color:var(--accent)}
+</style>
+
+<header>
+  <div class="wrap">
+    <div class="topbar">
+      <span class="kicker" id="kicker"></span>
+      <button id="themeBtn" class="btn" type="button">Dark / light</button>
+    </div>
+    <h1 id="h1"></h1>
+    <p class="lede" id="lede"></p>
+    <div class="statgrid" id="stats"></div>
+  </div>
+</header>
+
+<main>
+
+<section id="fly">
+  <div class="wrap">
+    <p class="eyebrow">1 · Flythrough</p>
+    <h2>The walk, with what the detector saw</h2>
+    <p class="prose">
+      Left is the camera with YOLO's boxes. Right is the world frame: the full path the robot
+      walked, its position now, and the direction it is facing. No memory involved — this is the
+      raw observation stream the map is built from.
+    </p>
+    <div class="card">
+      <div class="player">
+        <div class="pane">
+          <h3>Camera + detections</h3>
+          <canvas id="cvFlyImg" role="img" aria-label="Camera frame with detection boxes"></canvas>
+          <div class="legend" id="flyLegend"></div>
+        </div>
+        <div class="pane">
+          <h3>Where the robot is</h3>
+          <canvas id="cvFlyMap" role="img" aria-label="Walked path with current position and heading"></canvas>
+          <div class="legend">
+            <span><i style="background:var(--c-path)"></i>walked path</span>
+            <span><i style="background:var(--c-peak)"></i>position now + heading</span>
+          </div>
+        </div>
+      </div>
+      <div class="ctrl">
+        <button id="flyPlay" class="btn wide" type="button" aria-pressed="false">&#9654; Play</button>
+        <input id="flySlider" type="range" min="0" max="0" value="0" step="1" aria-label="Frame">
+        <span class="note" id="flyLabel" style="min-width:15ch"></span>
+      </div>
+      <dl class="kv" id="flyKV"></dl>
+    </div>
+  </div>
+</section>
+
+<section id="recall">
+  <div class="wrap">
+    <p class="eyebrow">2 · Memory recall</p>
+    <h2>Ask the memory where it is, one frame at a time</h2>
+    <div id="warnBox"></div>
+    <p class="prose">
+      The memory is a single vector holding every frame's appearance bound to the pose it was seen
+      from. To localise, take this frame's descriptor, divide it out, and correlate what is left
+      against a grid of candidate positions — bright is where the memory believes it is. Switch
+      encoder to see the same query answered by a memory built from a different backbone.
+    </p>
+    <div class="card">
+      <div class="chips" id="encChips" role="group" aria-label="Encoder"></div>
+      <div class="player">
+        <div class="pane">
+          <h3>Camera + detections</h3>
+          <canvas id="cvRecImg" role="img" aria-label="Camera frame with detection boxes"></canvas>
+        </div>
+        <div class="pane">
+          <h3>Where the memory says it is</h3>
+          <canvas id="cvRecMap" role="img" aria-label="Similarity field with true position and decoded peak"></canvas>
+          <div class="legend">
+            <span><i style="background:var(--c-truth)"></i>true position</span>
+            <span><i style="background:var(--c-peak)"></i>decoded peak</span>
+            <span><i style="background:var(--c-path)"></i>walked path</span>
+          </div>
+        </div>
+      </div>
+      <div class="ctrl">
+        <button id="recPlay" class="btn wide" type="button" aria-pressed="false">&#9654; Play</button>
+        <input id="recSlider" type="range" min="0" max="0" value="0" step="1" aria-label="Frame">
+        <span class="note" id="recLabel" style="min-width:15ch"></span>
+        <button id="recWorst" class="btn" type="button" title="Jump to the largest error for this encoder">Worst frame &#8594;</button>
+      </div>
+      <dl class="kv" id="recKV"></dl>
+      <p class="note" style="margin:10px 0 0">
+        Keyboard: <kbd>Space</kbd> play/pause, <kbd>&larr;</kbd> <kbd>&rarr;</kbd> step.
+      </p>
+    </div>
+    <div class="card tw">
+      <h3>Recall error across the whole replay, per encoder</h3>
+      <table id="recTable"><tbody></tbody></table>
+      <p class="note" id="recNote" style="margin-top:9px"></p>
+    </div>
+  </div>
+</section>
+
+<section id="compare">
+  <div class="wrap">
+    <p class="eyebrow">3 · Encoder comparison</p>
+    <h2>One crop in. What each backbone thinks is the same thing.</h2>
+    <p class="prose">
+      A query crop on the left, and the nearest neighbour each encoder returns on the right —
+      excluding anything within <span id="gapTxt"></span> frames, so a match cannot be the same
+      object one moment later. Green border means the retrieved crop is the same class as the query.
+      This is the retrieval measurement made visible: you can watch which encoders confuse what.
+    </p>
+    <div class="card">
+      <div class="ctrl" style="margin-top:0">
+        <button id="cmpPlay" class="btn wide" type="button" aria-pressed="false">&#9654; Play</button>
+        <input id="cmpSlider" type="range" min="0" max="0" value="0" step="1" aria-label="Query">
+        <span class="note" id="cmpLabel" style="min-width:13ch"></span>
+      </div>
+      <div class="cmp" style="margin-top:16px">
+        <div class="qbox">
+          <img id="cmpQ" alt="Query crop">
+          <b id="cmpQC" style="display:block;margin-top:7px;font-size:.85rem"></b>
+          <span class="note">query</span>
+        </div>
+        <div class="rrow" id="cmpR"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p id="foot"></p>
+    <p class="note" id="foot2"></p>
+  </div>
+</footer>
+
+<script id="data" type="application/json">__PAYLOAD__</script>
+<script>
+(function () {
+  "use strict";
+  var D = JSON.parse(document.getElementById("data").textContent);
+  var $ = function (s) { return document.querySelector(s); };
+  var css = function (v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); };
+  var REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var redraws = [];
+
+  /* ---------- viridis-ish LUT ---------- */
+  var LUT = (function () {
+    var stops = [[68,1,84],[72,40,120],[62,74,137],[49,104,142],[38,130,142],
+                 [31,158,137],[53,183,121],[109,205,89],[180,222,44],[253,231,37]];
+    var t = new Uint8Array(256 * 3);
+    for (var i = 0; i < 256; i++) {
+      var f = i / 255 * (stops.length - 1), a = Math.floor(f), b = Math.min(a + 1, stops.length - 1), m = f - a;
+      for (var c = 0; c < 3; c++) t[i * 3 + c] = stops[a][c] + (stops[b][c] - stops[a][c]) * m;
+    }
+    return t;
+  })();
+
+  function fit(cv, w, h) {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var cw = cv.clientWidth || 420;
+    cv.width = Math.round(cw * dpr); cv.height = Math.round(cw * h / w * dpr);
+    var x = cv.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { g: x, w: cw, h: cw * h / w };
+  }
+
+  /* ---------- images ---------- */
+  var IMG = D.frames.map(function (src) { var i = new Image(); i.src = src; return i; });
+
+  function drawCam(cv, st) {
+    var im = IMG[st.__i];
+    var iw = im.naturalWidth || 16, ih = im.naturalHeight || 9;
+    var c = fit(cv, iw, ih), g = c.g;
+    g.clearRect(0, 0, c.w, c.h);
+    if (im.complete && im.naturalWidth) g.drawImage(im, 0, 0, c.w, c.h);
+    else { g.fillStyle = css("--panel"); g.fillRect(0, 0, c.w, c.h); }
+    g.lineWidth = 2; g.font = "600 11px ui-monospace,Menlo,Consolas,monospace";
+    st.boxes.forEach(function (b) {
+      var x = b.b[0] * c.w, y = b.b[1] * c.h, w = (b.b[2] - b.b[0]) * c.w, h = (b.b[3] - b.b[1]) * c.h;
+      g.strokeStyle = "rgba(255,47,109,.95)"; g.strokeRect(x, y, w, h);
+      var lbl = b.c + " " + b.p.toFixed(2), tw = g.measureText(lbl).width + 8;
+      g.fillStyle = "rgba(0,0,0,.62)"; g.fillRect(x, Math.max(0, y - 15), tw, 15);
+      g.fillStyle = "#fff"; g.fillText(lbl, x + 4, Math.max(11, y - 4));
+    });
+  }
+
+  /* ---------- world map helpers ---------- */
+  var EX = D.extent;
+  function mapper(c) {
+    var pad = 10, W = c.w - pad * 2, H = c.h - pad * 2;
+    var sx = W / (EX[1] - EX[0]), sy = H / (EX[3] - EX[2]), s = Math.min(sx, sy);
+    var ox = pad + (W - (EX[1] - EX[0]) * s) / 2, oy = pad + (H - (EX[3] - EX[2]) * s) / 2;
+    return function (x, y) { return [ox + (x - EX[0]) * s, c.h - (oy + (y - EX[2]) * s)]; };
+  }
+  function drawPath(g, P) {
+    g.strokeStyle = css("--c-path"); g.lineWidth = 1.6; g.globalAlpha = .85;
+    g.beginPath();
+    D.path.forEach(function (p, i) { var q = P(p[0], p[1]); if (i) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]); });
+    g.stroke(); g.globalAlpha = 1;
+  }
+  function marker(g, p, fill, r) {
+    g.lineWidth = 2.5; g.strokeStyle = css("--halo");
+    g.beginPath(); g.arc(p[0], p[1], r, 0, 6.2832); g.stroke();
+    g.strokeStyle = fill; g.lineWidth = 2;
+    g.beginPath(); g.arc(p[0], p[1], r, 0, 6.2832); g.stroke();
+  }
+
+  function blitField(g, b64, c) {
+    var bin = atob(b64), n = D.grid * D.grid;
+    var off = document.createElement("canvas"); off.width = D.grid; off.height = D.grid;
+    var oc = off.getContext("2d"), id = oc.createImageData(D.grid, D.grid), px = id.data;
+    for (var k = 0; k < n; k++) {
+      var v = bin.charCodeAt(k), row = D.grid - 1 - Math.floor(k / D.grid), col = k % D.grid;
+      var t = (row * D.grid + col) * 4;
+      px[t] = LUT[v * 3]; px[t + 1] = LUT[v * 3 + 1]; px[t + 2] = LUT[v * 3 + 2]; px[t + 3] = 255;
+    }
+    oc.putImageData(id, 0, 0);
+    var pad = 10, W = c.w - pad * 2, H = c.h - pad * 2;
+    var s = Math.min(W / (EX[1] - EX[0]), H / (EX[3] - EX[2]));
+    var w = (EX[1] - EX[0]) * s, h = (EX[3] - EX[2]) * s;
+    var ox = pad + (W - w) / 2, oy = pad + (H - h) / 2;
+    g.imageSmoothingEnabled = true;
+    g.drawImage(off, ox, c.h - oy - h, w, h);
+  }
+
+  /* ================= PLAYER A : flythrough ================= */
+  var S = D.steps;
+  S.forEach(function (s, i) { s.__i = i; });
+  var A = { i: 0, playing: false, ms: 90, acc: 0, last: 0 };
+
+  function drawFlyMap() {
+    var cv = $("#cvFlyMap"), c = fit(cv, 4, 3), g = c.g;
+    g.clearRect(0, 0, c.w, c.h);
+    g.fillStyle = css("--panel"); g.fillRect(0, 0, c.w, c.h);
+    var P = mapper(c);
+    drawPath(g, P);
+    var st = S[A.i], p = P(st.x, st.y);
+    g.strokeStyle = css("--c-peak"); g.lineWidth = 2.5;
+    g.beginPath(); g.moveTo(p[0], p[1]);
+    g.lineTo(p[0] + Math.cos(st.yaw) * 26, p[1] - Math.sin(st.yaw) * 26); g.stroke();
+    marker(g, p, css("--c-peak"), 6);
+  }
+  function renderFly() {
+    var st = S[A.i];
+    drawCam($("#cvFlyImg"), st); drawFlyMap();
+    $("#flyLabel").textContent = "frame " + (A.i + 1) + " / " + S.length + "  ·  t=" + st.t.toFixed(1) + "s";
+    var counts = {};
+    st.boxes.forEach(function (b) { counts[b.c] = (counts[b.c] || 0) + 1; });
+    $("#flyLegend").innerHTML = Object.keys(counts).sort().map(function (k) {
+      return "<span>" + k + (counts[k] > 1 ? " ×" + counts[k] : "") + "</span>";
+    }).join("") || "<span>no detections</span>";
+    $("#flyKV").innerHTML =
+      "<dt>source frame</dt><dd>#" + st.f + "</dd>" +
+      "<dt>position</dt><dd>" + st.x.toFixed(2) + ", " + st.y.toFixed(2) + " m</dd>" +
+      "<dt>heading</dt><dd>" + (st.yaw * 180 / Math.PI).toFixed(0) + "°</dd>" +
+      "<dt>detections</dt><dd>" + st.nd + "</dd>";
+  }
+  redraws.push(renderFly);
+
+  /* ================= PLAYER B : memory recall ================= */
+  var ENCS = D.encoders.map(function (e) { return e.name; })
+                       .filter(function (n) { return D.err && D.err[n]; });
+  var curEnc = ENCS[0];
+  var B = { i: 0, playing: false, ms: 90, acc: 0, last: 0 };
+
+  function drawRecMap() {
+    var cv = $("#cvRecMap"), c = fit(cv, 4, 3), g = c.g;
+    g.clearRect(0, 0, c.w, c.h);
+    g.fillStyle = css("--panel"); g.fillRect(0, 0, c.w, c.h);
+    var st = S[B.i], e = st.e[curEnc];
+    if (e) blitField(g, e.fld, c);
+    var P = mapper(c);
+    drawPath(g, P);
+    if (e) {
+      var t = P(st.x, st.y), q = P(e.peak[0], e.peak[1]);
+      g.strokeStyle = "rgba(255,255,255,.6)"; g.lineWidth = 1.4;
+      g.beginPath(); g.moveTo(t[0], t[1]); g.lineTo(q[0], q[1]); g.stroke();
+      marker(g, t, css("--c-truth"), 7);
+      g.lineWidth = 2.5; g.strokeStyle = css("--halo");
+      g.beginPath(); g.moveTo(q[0] - 6, q[1] - 6); g.lineTo(q[0] + 6, q[1] + 6);
+      g.moveTo(q[0] + 6, q[1] - 6); g.lineTo(q[0] - 6, q[1] + 6); g.stroke();
+      g.strokeStyle = css("--c-peak"); g.lineWidth = 2;
+      g.beginPath(); g.moveTo(q[0] - 6, q[1] - 6); g.lineTo(q[0] + 6, q[1] + 6);
+      g.moveTo(q[0] + 6, q[1] - 6); g.lineTo(q[0] - 6, q[1] + 6); g.stroke();
+    }
+  }
+  function renderRec() {
+    var st = S[B.i], e = st.e[curEnc];
+    drawCam($("#cvRecImg"), st); drawRecMap();
+    $("#recLabel").textContent = "frame " + (B.i + 1) + " / " + S.length + "  ·  t=" + st.t.toFixed(1) + "s";
+    $("#recKV").innerHTML =
+      "<dt>encoder</dt><dd>" + curEnc + "</dd>" +
+      "<dt>true position</dt><dd>" + st.x.toFixed(2) + ", " + st.y.toFixed(2) + " m</dd>" +
+      (e ? "<dt>decoded peak</dt><dd>" + e.peak[0].toFixed(2) + ", " + e.peak[1].toFixed(2) + " m</dd>" +
+           "<dt>error</dt><dd><b>" + e.err.toFixed(3) + " m</b></dd>"
+         : "<dt>decoded peak</dt><dd>— (no detections in this frame)</dd>") +
+      "<dt>detections folded in</dt><dd>" + st.nd + "</dd>";
+  }
+  redraws.push(renderRec);
+
+  function buildChips() {
+    $("#encChips").innerHTML = "";
+    ENCS.forEach(function (n) {
+      var m = D.encoders.filter(function (x) { return x.name === n; })[0] || {};
+      var b = document.createElement("button");
+      b.className = "chip"; b.type = "button";
+      b.setAttribute("aria-pressed", n === curEnc ? "true" : "false");
+      b.innerHTML = n + " <span class='tag'>" + (m.tag || "") + "</span>";
+      b.addEventListener("click", function () {
+        curEnc = n;
+        [].forEach.call($("#encChips").children, function (c, k) {
+          c.setAttribute("aria-pressed", ENCS[k] === curEnc ? "true" : "false");
+        });
+        renderRec(); fillTable();
+      });
+      $("#encChips").appendChild(b);
+    });
+  }
+
+  function fillTable() {
+    var best = null;
+    ENCS.forEach(function (n) { if (best === null || D.err[n].median < D.err[best].median) best = n; });
+    var h = "<tr><th>encoder</th><th>dim</th><th>median</th><th>mean</th><th>p90</th><th>worst</th></tr>";
+    ENCS.forEach(function (n) {
+      var e = D.err[n], m = D.encoders.filter(function (x) { return x.name === n; })[0] || {};
+      h += "<tr" + (n === curEnc ? " style='background:var(--accent-soft)'" : "") + ">" +
+        "<td>" + n + " <span class='tag'>" + (m.tag || "") + "</span>" +
+        (n === best ? " <span class='tag' style='color:var(--good);border-color:var(--good)'>best</span>" : "") +
+        "</td><td class='n'>" + (m.dim || "–") + "</td>" +
+        "<td class='n'><b>" + e.median.toFixed(3) + " m</b></td>" +
+        "<td class='n'>" + e.mean.toFixed(3) + "</td>" +
+        "<td class='n'>" + e.p90.toFixed(3) + "</td>" +
+        "<td class='n'>" + e.max.toFixed(2) + "</td></tr>";
+    });
+    $("#recTable").innerHTML = h;
+
+    /* The spread between medians and tails is the point of this table, so say
+       it rather than leaving the reader to diff six columns. */
+    var meds = ENCS.map(function (n) { return D.err[n].median; });
+    var p90s = ENCS.map(function (n) { return D.err[n].p90; });
+    var mLo = Math.min.apply(null, meds), mHi = Math.max.apply(null, meds);
+    var pLo = Math.min.apply(null, p90s), pHi = Math.max.apply(null, p90s);
+    var un = ENCS.indexOf("untrained");
+    $("#recNote").innerHTML =
+      "<b>Read the tails, not the medians.</b> Across these " + ENCS.length +
+      " encoders the median spans only " + mLo.toFixed(3) + "–" + mHi.toFixed(3) +
+      "&nbsp;m, while the 90th percentile spans " + pLo.toFixed(2) + "–" + pHi.toFixed(2) +
+      "&nbsp;m — a " + (pHi / pLo).toFixed(1) + "× spread." +
+      (un >= 0 ? " The <b>randomly initialised</b> network reaches a median of " +
+        D.err["untrained"].median.toFixed(3) + "&nbsp;m, statistically indistinguishable from " +
+        "the trained ones, and separates only in its tail (p90 " +
+        D.err["untrained"].p90.toFixed(2) + "&nbsp;m)." : "") +
+      " That is not a quirk: binding a <em>consistent</em> content vector to a pose and then " +
+      "querying with that same vector recovers the pose whether or not the vector means " +
+      "anything. Closed-set self-recall therefore barely tests descriptor quality — which is " +
+      "exactly why held-out evaluation matters, and why the retrieval comparison below is the " +
+      "measurement that actually separates these encoders.";
+  }
+
+  /* ================= PLAYER C : encoder comparison ================= */
+  var C = { i: 0, playing: false, ms: 1500, acc: 0, last: 0 };
+  function renderCmp() {
+    if (!D.compare.length) return;
+    var r = D.compare[C.i];
+    $("#cmpQ").src = r.img; $("#cmpQC").textContent = r.cls;
+    $("#cmpLabel").textContent = "query " + (C.i + 1) + " / " + D.compare.length;
+    $("#cmpR").innerHTML = r.r.map(function (x) {
+      return "<div class='rcell " + (x.ok ? "ok" : "no") + "'>" +
+        "<img src='" + x.img + "' alt='nearest neighbour from " + x.e + "'>" +
+        "<b>" + x.e + "</b>" + x.cls + "<br><span class='v'>" + x.sim.toFixed(3) + "</span></div>";
+    }).join("");
+  }
+
+  /* ---------- transport wiring ---------- */
+  function wire(P, playBtn, slider, render, len) {
+    function setPlaying(v) {
+      P.playing = v;
+      playBtn.setAttribute("aria-pressed", v ? "true" : "false");
+      playBtn.innerHTML = v ? "&#10073;&#10073; Pause" : "&#9654; Play";
+      if (v) { P.last = 0; requestAnimationFrame(tick); }
+    }
+    function tick(ts) {
+      if (!P.playing) return;
+      if (!P.last) P.last = ts;
+      P.acc += ts - P.last; P.last = ts;
+      while (P.acc >= P.ms) { P.acc -= P.ms; P.i = (P.i + 1) % len; }
+      slider.value = String(P.i); render();
+      requestAnimationFrame(tick);
+    }
+    slider.max = String(len - 1);
+    playBtn.addEventListener("click", function () { setPlaying(!P.playing); });
+    slider.addEventListener("input", function () { P.i = parseInt(slider.value, 10); setPlaying(false); render(); });
+    P.setPlaying = setPlaying;
+    return setPlaying;
+  }
+  wire(A, $("#flyPlay"), $("#flySlider"), renderFly, S.length);
+  wire(B, $("#recPlay"), $("#recSlider"), renderRec, S.length);
+  if (D.compare.length) wire(C, $("#cmpPlay"), $("#cmpSlider"), renderCmp, D.compare.length);
+
+  $("#recWorst").addEventListener("click", function () {
+    var w = 0, bv = -1;
+    S.forEach(function (s, i) { var e = s.e[curEnc]; if (e && e.err > bv) { bv = e.err; w = i; } });
+    B.i = w; $("#recSlider").value = String(w); B.setPlaying(false); renderRec();
+  });
+
+  document.addEventListener("keydown", function (ev) {
+    var t = ev.target;
+    if (t && /^(INPUT|TEXTAREA|SELECT|BUTTON|SUMMARY)$/.test(t.tagName)) return;
+    var vis = null, r = null;
+    [["#recall", B, renderRec, S.length], ["#fly", A, renderFly, S.length]].forEach(function (x) {
+      if (vis) return;
+      var box = document.querySelector(x[0]).getBoundingClientRect();
+      if (box.top < innerHeight * .6 && box.bottom > innerHeight * .3) { vis = x[1]; r = x; }
+    });
+    if (!vis) return;
+    if (ev.code === "Space") { ev.preventDefault(); vis.setPlaying(!vis.playing); }
+    else if (ev.key === "ArrowRight") { ev.preventDefault(); vis.i = (vis.i + 1) % r[3]; vis.setPlaying(false); r[2](); }
+    else if (ev.key === "ArrowLeft") { ev.preventDefault(); vis.i = (vis.i - 1 + r[3]) % r[3]; vis.setPlaying(false); r[2](); }
+  });
+
+  /* ---------- header + footer text ---------- */
+  var pretty = D.scene === "school_run1" ? "school run" : D.scene;
+  $("#kicker").textContent = "ASTM · " + D.scene + " · video results";
+  $("#h1").textContent = "The " + pretty + ", replayed — and " + ENCS.length +
+                         " memories of it";
+  $("#lede").textContent =
+    "A Spot walk of " + D.n_all_frames.toLocaleString() + " frames and " +
+    D.n_events.toLocaleString() + " detections. Below: the raw observation stream, the same walk " +
+    "localised by a VSA memory built from each of " + ENCS.length + " different visual backbones, " +
+    "and the retrieval comparison that explains why they differ. Everything is precomputed and " +
+    "inlined — no network, no model runs in your browser.";
+  var bestN = ENCS.slice().sort(function (a, b) { return D.err[a].median - D.err[b].median; })[0];
+  /* With diverged poses the recall figure measures the odometry, so it must not
+     appear as a headline stat -- show the divergence instead. */
+  var thirdTile = D.warn
+    ? "<div class='stat'><b>&#9888; diverged</b><span>SLAM poses unusable: " +
+      D.warn.jumps_over_5m.toLocaleString() + " jumps &gt; 5 m — recall not measurable</span></div>"
+    : "<div class='stat'><b>" + D.err[bestN].median.toFixed(3) + " m</b><span>best median recall (" +
+      bestN + ")</span></div>";
+  $("#stats").innerHTML =
+    "<div class='stat'><b>" + D.n_all_frames.toLocaleString() + "</b><span>frames in the walk (" +
+      S.length + " replayed here)</span></div>" +
+    "<div class='stat'><b>" + D.n_events.toLocaleString() + "</b><span>object detections folded into the map</span></div>" +
+    thirdTile +
+    "<div class='stat'><b>" + ENCS.length + "</b><span>encoders, one memory each, identical boxes</span></div>";
+  $("#gapTxt").textContent = D.gap;
+  $("#foot").innerHTML =
+    "Built by <code>tools/export_video_page.py --scene " + D.scene + "</code>. Memory is " +
+    D.hd + "-d FHRR phasors, position encoded by fractional power encoding at &#8467; = " +
+    D.pos_l + " m, decoded on a " + D.grid + "×" + D.grid + " grid. Every " + D.mem_stride +
+    "th frame descriptor is bundled into the memory, matching the upstream pipeline's stride.";
+  $("#foot2").textContent =
+    "Content is the mean of a frame's per-object crop embeddings, PCA-whitened and projected to " +
+    "phasors — the same construction the workshop's associative memory uses. Binding class atoms " +
+    "instead does not localise: unbinding a class returns every place that class was ever seen, " +
+    "which measured 3.19 m median before this was corrected. Nothing here is held out — every " +
+    "replayed frame is in the stored set, so this is faithful recall, not generalisation.";
+
+  /* A diverged SLAM solution makes every recall number a measurement of the
+     odometry. Say so loudly rather than letting the table read as a result. */
+  if (D.warn) {
+    var w = D.warn;
+    $("#warnBox").innerHTML =
+      "<div style='border-left:4px solid var(--bad);background:var(--bad-soft);" +
+      "border-radius:0 10px 10px 0;padding:14px 18px;margin:14px 0;max-width:80ch'>" +
+      "<p style='margin:0 0 8px'><b>The odometry for this sequence has diverged. " +
+      "Do not read the numbers below as a memory result.</b></p>" +
+      "<p style='margin:0 0 8px;color:var(--ink2)'>The SLAM solution gives <b>" +
+      w.jumps_over_5m + " frame-to-frame jumps over 5 m</b> (measured on poses " +
+      "interpolated to camera frames), a path length of <b>" +
+      w.path_len_m.toLocaleString() + " m</b> in " + w.duration_s + " s, and a peak implied " +
+      "speed of <b>" + w.max_speed_ms.toLocaleString() + " m/s</b> — a Spot walks at " +
+      "about 1.6 m/s. The trajectory spans " + w.extent_m[0].toLocaleString() + " × " +
+      w.extent_m[1].toLocaleString() + " m for what is an indoor walk.</p>" +
+      "<p style='margin:0;color:var(--ink2)'>The memory is bound to those poses, so it " +
+      "recalls them faithfully — which is exactly the problem. What this panel actually " +
+      "demonstrates is that <em>an associative map is only ever as good as the poses you " +
+      "bind into it</em>. The flythrough above and the encoder comparison below use no " +
+      "poses at all and are unaffected.</p></div>";
+    var t = document.querySelector("#recall h2");
+    if (t) t.textContent = "Recall on diverged odometry — what failure looks like";
+  }
+
+  buildChips(); fillTable(); renderFly(); renderRec(); renderCmp();
+
+  var pending = null;
+  window.addEventListener("resize", function () {
+    clearTimeout(pending);
+    pending = setTimeout(function () { renderFly(); renderRec(); }, 90);
+  });
+  IMG.forEach(function (im) { im.addEventListener("load", function () { renderFly(); renderRec(); }, { once: true }); });
+
+  $("#themeBtn").addEventListener("click", function () {
+    var cur = document.documentElement.getAttribute("data-theme");
+    if (!cur) cur = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+    renderFly(); renderRec();
+  });
+
+  if (!REDUCED) { A.setPlaying(true); B.setPlaying(true); }
+})();
+</script>
