@@ -1,0 +1,30 @@
+# Dependencies for astm/. Install from this directory:
+#     pip install -r requirements.txt
+#
+# Python 3.10+ is required. On 3.9 you will hit
+#     TypeError: unsupported operand type(s) for |: 'type' and 'type'
+# from `str | Path` annotations, both here and in Meta's DINOv2 hub code.
+
+# --- core: needed by everything, including the no-data demos ---------------
+numpy>=1.24
+torch>=2.0
+
+# --- the analysis pipeline -------------------------------------------------
+pandas>=2.0
+pillow>=10.0
+matplotlib>=3.7
+
+# --- encoders --------------------------------------------------------------
+ultralytics>=8.0        # YOLOv8n detection + the frame-level embedding
+torchvision>=0.15       # ResNet-50 / ViT-B-16, trained and untrained
+transformers>=4.40      # DINOv2 (small | base | large | giant)
+
+# --- OPTIONAL: only for HuggingFace-hosted sequences -----------------------
+# `sequences.py` imports this lazily inside HuggingFaceSequence, so a
+# folder-based dataset (local images + TUM/CSV poses) does NOT need it.
+# Omit this line if you are bringing your own data on disk.
+datasets>=2.14
+
+# --- OPTIONAL: language queries -------------------------------------------
+# Only language_query.py needs a sentence encoder.
+# sentence-transformers>=2.2

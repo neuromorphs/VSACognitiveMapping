@@ -18,9 +18,13 @@ including several things that turned out to be wrong.
 ```bash
 git clone -b astm https://github.com/neuromorphs/VSACognitiveMapping.git
 cd VSACognitiveMapping/astm          # <- run everything below from here
-pip install torch torchvision transformers datasets ultralytics \
-            numpy pandas pillow matplotlib
+pip install -r requirements.txt
 ```
+
+Two dependencies are optional and marked as such in the file. `datasets` is
+only needed for the HuggingFace-hosted sequences — a folder of your own images
+does not need it, because `sequences.py` imports it lazily. If you are bringing
+your own data, you can skip it.
 
 **Run from `astm/`.** The package is `astm/vsa_cognitive_mapping/`, and the
 modules add that directory to `sys.path` themselves, so `python -m
@@ -42,6 +46,48 @@ Quick check:
 ```bash
 python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
+
+---
+
+## 1b. Run these two first — no data, no GPU, under a minute
+
+Before downloading anything, confirm the algebra works on your machine:
+
+```bash
+python -m vsa_cognitive_mapping.test_vsa                  # 18 correctness tests
+python -m vsa_cognitive_mapping.demo_associative_memory   # synthetic walk demo
+```
+
+`test_vsa` checks bind/unbind/bundle, the FPE homomorphism, unit modulus and
+projection shapes — expect `18/18 passed`. It needs only `numpy` and `torch`.
+
+`demo_associative_memory` builds a small memory from a synthetic robot walk,
+queries it back by position and time, prints the similarity kernel as ASCII, and
+sweeps bundling capacity against dimensionality. Its last table is the whole
+capacity story in miniature:
+
+```
+    hd_dim | exact acc | mean pos err (m)
+    -------+-----------+-----------------
+       256 |   0.917   |   0.0228
+       512 |   0.958   |   0.0000
+      1024 |   0.958   |   0.0000
+```
+
+If those two run, everything else is a data problem rather than an install
+problem.
+
+### The playable pages
+
+Rendered results you can open in a browser without running anything — see
+[docs/README.md](docs/README.md) for all of them with one-click links. The two
+worth opening first are the **classroom video** (three frame-by-frame players:
+the walk, the memory recalling position under four different encoders, and what
+each encoder retrieves for a query crop) and the **interactive demo**
+(free-text queries, time queries, memory merge, then the mechanism explained).
+
+Note the video pages' recall figures predate the held-out protocol, so they are
+closed-set numbers — see [RESULTS_SO_FAR.md](docs/RESULTS_SO_FAR.md).
 
 ---
 
