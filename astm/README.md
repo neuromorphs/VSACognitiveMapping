@@ -8,6 +8,15 @@ running the *actual* `init-am` code as the episodic-memory engine (via the
 `external/` snapshot noted below) and extending it with a multi-trace
 spatio-temporal memory, calibration, working memory, and language queries.
 
+## ▸ Running this yourself? Start at [`START_HERE.md`](START_HERE.md)
+
+Install, first run, GPU notes and the pipeline in order — plus
+[CONCEPTS.md](docs/CONCEPTS.md) (the ideas from scratch),
+[RESULTS_SO_FAR.md](docs/RESULTS_SO_FAR.md) (**what is known and what turned out
+to be wrong** — read this before quoting any number), and
+[ADVANCED_SIGREG_VSA.md](docs/ADVANCED_SIGREG_VSA.md) (training an encoder whose
+output suits the algebra). Bring your own data with [DATASETS.md](DATASETS.md).
+
 ## ▸ Read the results first (rendered, no clone needed)
 
 **[Results briefing — every measured result, for a robotics audience](https://raw.githack.com/neuromorphs/VSACognitiveMapping/astm/astm/docs/results_robotics_share.html)**

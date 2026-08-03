@@ -1,4 +1,19 @@
-# ASTM documentation — read these in the browser
+# ASTM documentation
+
+**New to this project, or here to run it?** Start at
+[`../START_HERE.md`](../START_HERE.md) — install, first run, GPU notes, and the
+pipeline in order. Then:
+
+| Read | What it is |
+|---|---|
+| [CONCEPTS.md](CONCEPTS.md) | Binding, bundling, isotropy, crosstalk — the ideas, no prior VSA knowledge assumed |
+| [RESULTS_SO_FAR.md](RESULTS_SO_FAR.md) | Every measured result, **the corrections**, and the open questions. Read before quoting any number. |
+| [ADVANCED_SIGREG_VSA.md](ADVANCED_SIGREG_VSA.md) | The research direction: training an encoder whose output suits the algebra |
+| [../DATASETS.md](../DATASETS.md) | Running on your own data |
+
+---
+
+## The rendered pages — read these in the browser
 
 GitHub renders `.html` as **source code**, not as a page. Use the "open
 rendered" links below — they need no repo configuration; both services just

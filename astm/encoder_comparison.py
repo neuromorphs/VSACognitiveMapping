@@ -41,7 +41,13 @@ DATASET = "lorinachey/spot-telluride-workshop-dataset"
 # --------------------------------------------------------------------------
 
 
-def _torchvision_cnn(arch, pretrained):
+def resolve_device(spec="auto"):
+    if spec != "auto":
+        return spec
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _torchvision_cnn(arch, pretrained, device="cpu"):
     import torchvision.models as tvm
     from torchvision import transforms
 
@@ -57,7 +63,7 @@ def _torchvision_cnn(arch, pretrained):
         dim = 768
     else:
         raise ValueError(arch)
-    m.eval()
+    m.eval().to(device)
 
     tf = transforms.Compose([
         transforms.Resize((224, 224)),
@@ -67,13 +73,21 @@ def _torchvision_cnn(arch, pretrained):
 
     @torch.no_grad()
     def run(imgs):
-        x = torch.stack([tf(im.convert("RGB")) for im in imgs])
-        return m(x).float()
+        x = torch.stack([tf(im.convert("RGB")) for im in imgs]).to(device)
+        return m(x).float().cpu()
 
     return dim, run
 
 
-def _dinov2(name="facebook/dinov2-small"):
+DINO_VARIANTS = {                      # short name -> HF id, output dim
+    "small": ("facebook/dinov2-small", 384),
+    "base": ("facebook/dinov2-base", 768),
+    "large": ("facebook/dinov2-large", 1024),
+    "giant": ("facebook/dinov2-giant", 1536),
+}
+
+
+def _dinov2(name="facebook/dinov2-small", device="cpu", img_size=224):
     """DINOv2 ViT-S/14 CLS embedding, preprocessed exactly the way the upstream
     ``init-am`` pipeline does it (``scripts/classroom/detect_and_embed_classroom.py``
     -> ``preprocess_dino_batch``): square BILINEAR resize to 224, /255, ImageNet
@@ -92,33 +106,40 @@ def _dinov2(name="facebook/dinov2-small"):
     from PIL import Image
     from transformers import AutoModel
 
-    m = AutoModel.from_pretrained(name).eval()
+    m = AutoModel.from_pretrained(name).eval().to(device)
     dim = m.config.hidden_size
     MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
     STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
     @torch.no_grad()
     def run(imgs):
-        arr = [np.asarray(im.convert("RGB").resize((224, 224), Image.Resampling.BILINEAR),
+        arr = [np.asarray(im.convert("RGB").resize((img_size, img_size),
+                                                   Image.Resampling.BILINEAR),
                           dtype=np.float32) / 255.0 for im in imgs]
         b = (np.stack(arr) - MEAN) / STD
-        x = torch.from_numpy(b).permute(0, 3, 1, 2).contiguous()
-        return m(pixel_values=x).last_hidden_state[:, 0].float()   # CLS token
+        x = torch.from_numpy(b).permute(0, 3, 1, 2).contiguous().to(device)
+        return m(pixel_values=x).last_hidden_state[:, 0].float().cpu()   # CLS token
 
     return dim, run
 
 
-def build_encoder(key):
+def build_encoder(key, device="cpu", img_size=224):
+    """`key` is either a plain name or `dinov2:<variant>` (small|base|large|giant).
+    Plain `dinov2` means `dinov2:small`, which is what every result in the repo
+    so far was measured with."""
     if key == "resnet50":
-        return _torchvision_cnn("resnet50", True)
+        return _torchvision_cnn("resnet50", True, device)
     if key == "resnet50-untrained":
-        return _torchvision_cnn("resnet50", False)
+        return _torchvision_cnn("resnet50", False, device)
     if key == "vit_b_16":
-        return _torchvision_cnn("vit_b_16", True)
+        return _torchvision_cnn("vit_b_16", True, device)
     if key == "vit_b_16-untrained":
-        return _torchvision_cnn("vit_b_16", False)
-    if key == "dinov2":
-        return _dinov2("facebook/dinov2-small")
+        return _torchvision_cnn("vit_b_16", False, device)
+    if key == "dinov2" or key.startswith("dinov2:"):
+        variant = key.split(":", 1)[1] if ":" in key else "small"
+        if variant not in DINO_VARIANTS:
+            raise ValueError(f"dinov2 variant must be one of {sorted(DINO_VARIANTS)}")
+        return _dinov2(DINO_VARIANTS[variant][0], device, img_size)
     raise ValueError(f"unknown encoder {key}")
 
 
@@ -150,7 +171,13 @@ def main():
                     default=["resnet50", "dinov2", "resnet50-untrained"])
     ap.add_argument("--pad-frac", type=float, default=0.08,
                     help="must match the YOLO crop stage for a controlled comparison")
-    ap.add_argument("--batch", type=int, default=32)
+    ap.add_argument("--batch", type=int, default=32,
+                    help="raise this on a GPU: 128-256 is comfortable for "
+                         "dinov2:base, 64-128 for large")
+    ap.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu"])
+    ap.add_argument("--img-size", type=int, default=224,
+                    help="DINOv2 input size; must be a multiple of the patch "
+                         "size 14. 224 matches upstream and every result so far")
     ap.add_argument("--limit", type=int, default=0,
                     help="cap detections (0 = all); use for a fast smoke run")
     args = ap.parse_args()
@@ -183,9 +210,17 @@ def main():
     frames = sorted(by_frame)
     print(f"{len(frames)} distinct frames to re-open\n")
 
+    device = resolve_device(args.device)
+    if args.img_size % 14:
+        raise SystemExit(f"--img-size {args.img_size} must be a multiple of 14 "
+                         f"(DINOv2's patch size)")
+    print(f"device: {device}"
+          + (f" ({torch.cuda.get_device_name(0)})" if device == "cuda" else "")
+          + f", batch {args.batch}, img_size {args.img_size}")
+
     for key in args.encoders:
         print(f"--- {key} ---", flush=True)
-        dim, run = build_encoder(key)
+        dim, run = build_encoder(key, device, args.img_size)
         E = torch.zeros(len(rows), dim, dtype=torch.float32)
         buf_img, buf_k = [], []
 
@@ -217,11 +252,15 @@ def main():
                 print(f"  frame {n}/{len(frames)}", flush=True)
         flush()
 
-        out_path = os.path.join(args.out_dir, f"crop_embeddings_{key}.pt")
+        # `dinov2:base` -> crop_embeddings_dinov2-base.pt, so variants coexist
+        # instead of silently overwriting each other
+        safe = key.replace(":", "-")
+        out_path = os.path.join(args.out_dir, f"crop_embeddings_{safe}.pt")
         torch.save({"embedding": E,
                     "frame_idx": torch.tensor([r[0] for r in rows]),
                     "class_id": torch.tensor([r[1] for r in rows]),
-                    "encoder": key, "dim": dim,
+                    "encoder": key, "dim": dim, "device": device,
+                    "img_size": args.img_size,
                     "pad_frac": args.pad_frac}, out_path)
         print(f"  saved {tuple(E.shape)} -> {out_path}\n", flush=True)
 
