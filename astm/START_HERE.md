@@ -17,10 +17,17 @@ including several things that turned out to be wrong.
 
 ```bash
 git clone -b astm https://github.com/neuromorphs/VSACognitiveMapping.git
-cd VSACognitiveMapping
+cd VSACognitiveMapping/astm          # <- run everything below from here
 pip install torch torchvision transformers datasets ultralytics \
             numpy pandas pillow matplotlib
 ```
+
+**Run from `astm/`.** The package is `astm/vsa_cognitive_mapping/`, and the
+modules add that directory to `sys.path` themselves, so `python -m
+vsa_cognitive_mapping.<module>` works from `astm/` with no install step. Run it
+from the repo root instead and you get
+`ModuleNotFoundError: No module named 'vsa_cognitive_mapping'`. Every path in
+this document is relative to `astm/`.
 
 **Python version matters.** Use **3.10 or newer** for everything in `astm/`.
 Some of the wider repo (and Meta's DINOv2 hub code) uses `str | Path`
