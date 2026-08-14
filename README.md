@@ -1,10 +1,21 @@
 # VSACognitiveMapping
 
-> **Looking for the GPU tasks to hand to students/collaborators?**
-> → **[astm/collab_tasks/README.md](astm/collab_tasks/README.md)** — three
-> ready-to-run tasks for the ConceptGraphs semantic-map comparison, pick
-> any one. For everything else on this branch (the ASTM memory system
-> itself), start at **[astm/README.md](astm/README.md)**.
+---
+
+**This branch root hosts two independent, unrelated projects that happen to
+share a git history — everything below this box is the first one (JEPA /
+associative memory, `src/`, `scripts/`, `pyproject.toml`). The second lives
+entirely under [`astm/`](astm/) and does not touch anything below.**
+
+**→ Looking for the GPU tasks to hand to students/collaborators?**
+Go straight to **[astm/collab_tasks/README.md](astm/collab_tasks/README.md)**
+— three ready-to-run tasks for the ConceptGraphs semantic-map comparison,
+fully self-contained, nothing else on this page is relevant to them.
+
+**→ Everything else about the ASTM memory system:** start at
+[astm/README.md](astm/README.md).
+
+---
 
 ## Summary
 
