@@ -84,16 +84,28 @@ DEFAULT_OUT = os.path.join("outputs", "classroom")
 
 
 def content_variants(emb, hd, seed, n_pca):
-    """(raw, whitened) content phasor arrays, both (N, hd) complex128,
-    via the pipeline's exact projection path."""
-    z_raw, _ = random_project_to_phasor(
-        torch.from_numpy(np.ascontiguousarray(emb)).float(), d=hd, seed=seed)
+    """Ordered dict of content phasor arrays, each (N, hd) complex128,
+    all through the SAME random_project_to_phasor(d=hd, seed) path.
+
+    Decomposes the whitening gain into its ingredients:
+      raw      : emb as-is (the pre-fix path)
+      centred  : emb - column mean  (covariance spectrum bit-identical to raw)
+      zscored  : centred / per-dim std  (diagonal scaling, no rotation)
+      whitened : PCA-n_pca standardized scores (the pipeline's fix)
+    """
+    def proj(X):
+        z, _ = random_project_to_phasor(
+            torch.from_numpy(np.ascontiguousarray(X)).float(), d=hd, seed=seed)
+        return z.numpy().astype(np.complex128)
+
+    centred = emb - emb.mean(axis=0, keepdims=True)
+    zscored = centred / (emb.std(axis=0, keepdims=True) + 1e-9)
     k = min(n_pca, emb.shape[1], emb.shape[0] - 1)
     scores, _ = pca_components(emb.astype(np.float64), n_components=k)
-    z_wht, _ = random_project_to_phasor(
-        torch.from_numpy(np.ascontiguousarray(scores)).float(), d=hd, seed=seed)
-    return (z_raw.numpy().astype(np.complex128),
-            z_wht.numpy().astype(np.complex128))
+    return {"raw": proj(emb),
+            "centred": proj(centred),
+            "zscored": proj(zscored),
+            "whitened": proj(scores)}
 
 
 def crop_frame_descriptors(out_dir, fname):
@@ -199,7 +211,7 @@ def main():
     print(f"{N_all} frames of content from {src}; hd={args.hd_dim}, "
           f"input dim={emb.shape[1]}")
 
-    C_raw, C_wht = content_variants(emb, args.hd_dim, args.seed, args.n_pca)
+    variants = content_variants(emb, args.hd_dim, args.seed, args.n_pca)
     enc = ClassroomEncoders(args.hd_dim, args.seed + 100,
                             args.pos_length_scale, 20.0)
     P = np.empty((N_all, args.hd_dim), np.complex128)
@@ -207,7 +219,7 @@ def main():
         P[i] = enc.ctx_pos(float(x[i]), float(y[i])).values
 
     rng0 = np.random.RandomState(999)
-    for name, C in (("raw", C_raw), ("whitened", C_wht)):
+    for name, C in variants.items():
         mo, moa = mean_offdiag_cos(C, 300, rng0)
         print(f"  {name:8s} content phasors: mean off-diag cos {mo:+.4f} "
               f"(mean |cos| {moa:.4f})")
@@ -221,8 +233,8 @@ def main():
     # extended past 1600 so school_run1 (~10k frame descriptors) is sampled
     # along the way rather than jumping straight from 1600 to the endpoint
     Ns = [n for n in (50, 100, 200, 400, 800, 1600, 3200, 6400) if n < N_all] + [N_all]
-    results = {"raw": {}, "whitened": {}}
-    for name, C in (("raw", C_raw), ("whitened", C_wht)):
+    results = {name: {} for name in variants}
+    for name, C in variants.items():
         for n in Ns:
             vals = []
             for s in args.sub_seeds:
@@ -248,7 +260,7 @@ def main():
     for metric in ("ratio_mean", "chi_mean"):
         tag = "ratio (off/measured-on)" if metric == "ratio_mean" else \
             "chi (off/per-item-signal)"
-        for name in ("raw", "whitened"):
+        for name in variants:
             m, b = fit_slope(Ns, [results[name][n][metric] for n in Ns])
             slopes[(name, metric)] = m
             print(f"  {tag:26s} {name:8s}: slope {m:+.3f}  "
@@ -259,9 +271,14 @@ def main():
           f"were 365x raw / 27x whitened) ----")
     for metric, tag in (("ratio_mean", "ratio"), ("chi_mean", "chi")):
         r_raw = results["raw"][n_end][metric]
-        r_wht = results["whitened"][n_end][metric]
-        print(f"  {tag:6s}: raw {r_raw:8.2f}x   whitened {r_wht:8.2f}x   "
-              f"raw/whitened improvement {r_raw / r_wht:.1f}x")
+        parts = []
+        for name in variants:
+            v = results[name][n_end][metric]
+            part = f"{name} {v:8.2f}x"
+            if name != "raw":
+                part += f" (raw/{name} {r_raw / v:.1f}x)"
+            parts.append(part)
+        print(f"  {tag:6s}: " + "   ".join(parts))
 
     if not args.no_figure:
         import matplotlib
@@ -276,8 +293,11 @@ def main():
                    "chi(N) = N * mean|offtarget|  (per-item-signal units)",
                    "(b) growth-law metric: interference vs one stored "
                    "item's signal")]
+        colors = {"raw": "#b9772a", "centred": "#8a5fbf",
+                  "zscored": "#3d7dbf", "whitened": "#0d7d88"}
         for ax, (mk, sk, ylab, title) in zip(axs, panels):
-            for name, color in (("raw", "#b9772a"), ("whitened", "#0d7d88")):
+            for name in variants:
+                color = colors[name]
                 mu = np.array([results[name][n][mk] for n in Ns])
                 sd = np.array([results[name][n][sk] for n in Ns])
                 ax.errorbar(Ns, mu, yerr=sd, fmt="o-", color=color, lw=1.6,

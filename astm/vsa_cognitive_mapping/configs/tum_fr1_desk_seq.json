@@ -1,0 +1,27 @@
+{
+  "_comment": [
+    "TUM RGB-D freiburg1_desk (handheld Kinect office desk sequence, 640x480,",
+    "~30 Hz, 613 RGB frames over 20.4 s). Second, non-Spot environment for the",
+    "image-only claims (isotropy/retrieval dissociation, Timkey, encoder table).",
+    "Source: https://cvg.cit.tum.de/rgbd/dataset/freiburg1/rgbd_dataset_freiburg1_desk.tgz",
+    "",
+    "The glob points at rgb_seq/, a timestamp-sorted copy of rgb/ renamed to",
+    "frame_%06d.png. This is required, not cosmetic: FolderSequence derives",
+    "frame_idx from the FIRST integer in the filename, and TUM's native names",
+    "(1305031452.791720.png) make that the Unix-epoch SECOND, so ~30 frames",
+    "would share one frame_idx — corrupting the crop->frame join in",
+    "encoder_comparison and turning retrieval gaps into units of 1 s.",
+    "rgb_seq is built by sorting rgb/*.png on the float timestamp in the name."
+  ],
+  "name": "tum_fr1_desk",
+  "kind": "folder",
+  "images": "data/rgbd_dataset_freiburg1_desk/rgb_seq/*.png",
+  "fps": 30,
+  "out_dir": "outputs/tum_fr1_desk",
+  "poses": {
+    "kind": "tum",
+    "path": "data/rgbd_dataset_freiburg1_desk/groundtruth.txt",
+    "axes": "xy",
+    "rescale_time": true
+  }
+}

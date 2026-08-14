@@ -43,6 +43,20 @@ comes from LIO-SAM, and the VSA is a memory rather than a localiser, so
 "relative motion from odometry, absolute correction from memory" is the
 architecture, not a shortcut.
 
+Statistics
+----------
+A single odometry-noise draw moved the headline numbers ~2x between draws, so
+results are reported as mean+/-std over ``--noise-seeds`` (default 10 draws).
+Everything expensive -- frame descriptors, the phasor projection, the decode
+grid, the per-frame measurements (which do not depend on odometry) and the
+memory -- is built once and reused. Each noise seed regenerates only the
+odometry corruption (``RandomState(noise_seed + 777)``), its STEP vectors, the
+dead-reckoning track, and the cheap filter recursion + batched decode. The
+memory split stays fixed (``--seed``) across all noise seeds, so between-seed
+spread is attributable to odometry noise alone. Aggregates are written to
+``vsa_kalman_seeds.json``; the legacy single-run ``vsa_kalman.json`` is only
+written when exactly one noise seed is given.
+
     python -m vsa_cognitive_mapping.vsa_kalman --out-dir outputs/classroom
 """
 from __future__ import annotations
@@ -51,6 +65,7 @@ import argparse
 import json
 import os
 import sys
+from collections import Counter
 
 import numpy as np
 import torch
@@ -98,7 +113,13 @@ def main():
                     help="per-step Gaussian sigma on each delta component (m)")
     ap.add_argument("--odom-bias", type=float, default=0.004,
                     help="systematic per-step drift added to each delta (m)")
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--seed", type=int, default=0,
+                    help="split seed: fixes WHICH frames the memory holds; kept "
+                         "constant across all noise seeds")
+    ap.add_argument("--noise-seeds", type=int, nargs="+",
+                    default=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+                    help="odometry-noise seeds; results are aggregated as "
+                         "mean+/-std over these draws")
     ap.add_argument("--sweep", action="store_true",
                     help="scan the gain, fixed and adaptive, before the headline run")
     ap.add_argument("--odom-sweep", action="store_true",
@@ -141,21 +162,8 @@ def main():
     print(f"{n} frames, memory holds {mem.sum()} ({args.split}), "
           f"encoder={args.encoder}, treatment={args.treatment}")
 
-    # --- drifting odometry ------------------------------------------------
-    d_true = np.diff(XY, axis=0)
-    step = np.hypot(d_true[:, 0], d_true[:, 1])[:, None]
-    # Dedicated stream: `rng` has already been advanced by make_split, so
-    # sharing it made the headline run and the odometry sweep draw different
-    # noise for identical parameters (0.350 m vs 0.777 m dead-reckoning median).
-    orng = np.random.RandomState(args.seed + 777)
-    d_odo = (d_true
-             + orng.normal(0, args.odom_noise, d_true.shape)
-             + args.odom_bias * step * np.array([[1.0, 0.6]]))
-    dead = np.vstack([XY[0], XY[0] + np.cumsum(d_odo, axis=0)])
-    print(f"odometry: noise sigma {args.odom_noise} m/step, bias {args.odom_bias} m/m; "
-          f"dead-reckoning final drift {np.hypot(*(dead[-1]-XY[-1])):.2f} m")
-
-    # --- per-frame raw measurements --------------------------------------
+    # --- per-frame raw measurements (do NOT depend on odometry) -----------
+    # Built once and reused across every noise seed, like Z, G and M above.
     R = M[None, :] / Z                                  # unbind every frame at once
     S_all = (R @ np.conj(G).T).real
     j = S_all.argmax(1)
@@ -165,12 +173,29 @@ def main():
     print(f"measurement confidence z: min {zs.min():.1f}, median {np.median(zs):.1f}, "
           f"p90 {np.percentile(zs,90):.1f}, max {zs.max():.1f}")
 
-    # Motion vectors are the same for every gain setting, so build them once.
-    STEP = np.stack([enc.ctx_pos(float(dx), float(dy)).values for dx, dy in d_odo])
     Rn = normalise(R)                       # measurement vectors, unit modulus
 
+    # --- drifting odometry, one draw per noise seed -----------------------
+    d_true = np.diff(XY, axis=0)
+    step = np.hypot(d_true[:, 0], d_true[:, 1])[:, None]
+
+    def make_odometry(noise_seed, nz, bias):
+        """Dedicated stream per noise seed: RandomState(noise_seed + 777),
+        independent of the split rng (make_split already advanced `rng`, and
+        sharing it once made identical parameters draw different noise:
+        0.350 m vs 0.777 m dead-reckoning median)."""
+        orng = np.random.RandomState(noise_seed + 777)
+        dd = (d_true
+              + orng.normal(0, nz, d_true.shape)
+              + bias * step * np.array([[1.0, 0.6]]))
+        return dd, np.vstack([XY[0], XY[0] + np.cumsum(dd, axis=0)])
+
+    def make_steps(dd):
+        """Per-step motion phasors; cheap next to the batched grid decode."""
+        return np.stack([enc.ctx_pos(float(dx), float(dy)).values for dx, dy in dd])
+
     # --- the filter -------------------------------------------------------
-    def run_filter(mode, alpha=None, z_mid=None):
+    def run_filter(mode, STEP, alpha=None, z_mid=None):
         """The recursion is pure O(D) vector algebra -- decoding every step to a
         grid was 99% of the cost and is not needed to RUN the filter, only to
         report it. Collect the posterior track, then decode it in one matmul."""
@@ -194,92 +219,188 @@ def main():
     def err(a):
         return np.hypot(a[:, 0] - XY[:, 0], a[:, 1] - XY[:, 1])
 
+    def mstd(v):
+        v = np.asarray(v, float)
+        return float(v.mean()), (float(v.std(ddof=1)) if len(v) > 1 else 0.0)
+
+    seeds = list(args.noise_seeds)
+    attribution = (f"split fixed ({args.split}, --seed {args.seed}) across all "
+                   f"noise seeds {seeds}; only the odometry corruption varies "
+                   f"(RandomState(noise_seed + 777))")
+    print(f"odometry: noise sigma {args.odom_noise} m/step, bias {args.odom_bias} m/m")
+    print(attribution)
+
+    GAIN_GRID = (0.02, 0.05, 0.10, 0.20, 0.35, 0.60)
+    sweep_json = []
     if args.odom_sweep:
         # The measurement never depends on the odometry, so R/zs are reused and
         # only the motion model changes. This finds the crossover: how bad must
         # dead reckoning get before associative recall is worth blending in?
+        # Per (noise, bias) level and per noise seed the gain grid is swept,
+        # the per-seed best is taken, THEN mean+/-std is computed over seeds.
         print("\nodometry-quality sweep — the filter can only help once dead")
-        print("reckoning is worse than the recall it is being corrected by:")
-        hdr = (f"{'noise/bias':<18}{'dead med':>10}{'dead final':>11}"
-               f"{'best filt':>11}{'at gain':>9}{'helps?':>8}")
+        print(f"reckoning is worse than the recall correcting it. mean+/-std of the")
+        print(f"median error over {len(seeds)} noise seeds; {attribution}")
+        hdr = (f"{'noise/bias':<18}{'dead med (m)':>16}{'best filt (m)':>16}"
+               f"{'mode gain':>10}{'gain wins':>22}{'helps':>7}")
         print(hdr); print("-" * len(hdr))
         for nz, bi in ((0.02, 0.004), (0.05, 0.010), (0.10, 0.025),
                        (0.20, 0.050), (0.40, 0.100)):
-            rr = np.random.RandomState(args.seed + 777)   # same stream as above
-            dd = (d_true + rr.normal(0, nz, d_true.shape)
-                  + bi * step * np.array([[1.0, 0.6]]))
-            dead_s = np.vstack([XY[0], XY[0] + np.cumsum(dd, axis=0)])
-            e_dead_s = np.median(err(dead_s))
-            STEP_s = np.stack([enc.ctx_pos(float(a), float(b)).values for a, b in dd])
-            best, best_a = None, None
-            for a in (0.0, 0.02, 0.05, 0.10, 0.20, 0.35, 0.60):
-                S_post = enc.ctx_pos(float(XY[0, 0]), float(XY[0, 1])).values.copy()
-                trk = np.empty((n, args.hd_dim), np.complex128); trk[0] = S_post
-                for i in range(1, n):
-                    S_post = normalise(a * Rn[i] + (1.0 - a) * (S_post * STEP_s[i - 1]))
-                    trk[i] = S_post
-                Sx = (trk.astype(np.complex64) @ np.conj(G).T).real
-                jx = Sx.argmax(1)
-                tr = np.stack([gx[jx % args.grid], gy[jx // args.grid]], 1); tr[0] = XY[0]
-                m = float(np.median(err(tr)))
-                if best is None or m < best:
-                    best, best_a = m, a
-            fin = float(np.hypot(*(dead_s[-1] - XY[-1])))
+            dead_meds, best_meds, best_gains = [], [], []
+            for ns in seeds:
+                dd, dead_s = make_odometry(ns, nz, bi)
+                dead_meds.append(float(np.median(err(dead_s))))
+                STEP_s = make_steps(dd)
+                per_gain = {}
+                for a in GAIN_GRID:
+                    tr, _ = run_filter("fixed", STEP_s, alpha=a)
+                    per_gain[a] = float(np.median(err(tr)))
+                ba = min(per_gain, key=per_gain.get)
+                best_gains.append(ba)
+                best_meds.append(per_gain[ba])
+            dm, ds = mstd(dead_meds)
+            bm, bs = mstd(best_meds)
+            wins = Counter(best_gains)
+            mode_gain = wins.most_common(1)[0][0]
+            helps = int((np.array(best_meds) < np.array(dead_meds)).sum())
+            wins_str = ",".join(f"{g:.2f}x{c}" for g, c in wins.most_common())
             print(f"{'s=' + format(nz,'.2f') + ' b=' + format(bi,'.3f'):<18}"
-                  f"{e_dead_s:>10.3f}{fin:>11.2f}{best:>11.3f}{best_a:>9.2f}"
-                  f"{('YES' if best < e_dead_s else 'no'):>8}")
+                  f"{format(dm,'.3f') + '+/-' + format(ds,'.3f'):>16}"
+                  f"{format(bm,'.3f') + '+/-' + format(bs,'.3f'):>16}"
+                  f"{mode_gain:>10.2f}{wins_str:>22}"
+                  f"{format(helps) + '/' + format(len(seeds)):>7}")
+            sweep_json.append({
+                "noise": nz, "bias": bi,
+                "dead_median_mean": dm, "dead_median_std": ds,
+                "best_filtered_mean": bm, "best_filtered_std": bs,
+                "best_gain_mode": mode_gain,
+                "gain_wins": {f"{g:.2f}": c for g, c in wins.most_common()},
+                "helps_seeds": helps, "n_seeds": len(seeds),
+                "per_seed": {"noise_seed": seeds,
+                             "dead_median": dead_meds,
+                             "best_filtered": best_meds,
+                             "best_gain": best_gains}})
         print()
 
     if args.sweep:
-        print("\ngain sweep — the filter cannot beat its best input by much, so this")
-        print("shows where the optimum sits between odometry and recall:")
+        print(f"\ngain sweep (noise seed {seeds[0]} only) — the filter cannot beat its")
+        print("best input by much, so this shows where the optimum sits between")
+        print("odometry and recall:")
+        dd0, _ = make_odometry(seeds[0], args.odom_noise, args.odom_bias)
+        STEP0 = make_steps(dd0)
         hdr = (f"{'gain':<24}{'median':>9}{'mean':>9}{'p90':>9}"
                f"{'max jump':>10}{'>0.5 m':>9}")
         print(hdr); print("-" * len(hdr))
-        for a in (0.02, 0.05, 0.10, 0.20, 0.35, 0.60):
-            f_, _ = run_filter("fixed", alpha=a)
+        for a in GAIN_GRID:
+            f_, _ = run_filter("fixed", STEP0, alpha=a)
             e, jp = err(f_), np.hypot(*np.diff(f_, axis=0).T)
             print(f"{'fixed a=' + format(a, '.2f'):<24}{np.median(e):>9.3f}{e.mean():>9.3f}"
                   f"{np.percentile(e,90):>9.3f}{jp.max():>10.3f}{int((jp>0.5).sum()):>9}")
         for zm in (np.percentile(zs, 75), np.percentile(zs, 90), np.percentile(zs, 97)):
-            f_, g_ = run_filter("adaptive", z_mid=zm)
+            f_, g_ = run_filter("adaptive", STEP0, z_mid=zm)
             e, jp = err(f_), np.hypot(*np.diff(f_, axis=0).T)
             print(f"{'adaptive z_mid=' + format(zm, '.1f'):<24}{np.median(e):>9.3f}"
                   f"{e.mean():>9.3f}{np.percentile(e,90):>9.3f}{jp.max():>10.3f}"
                   f"{int((jp>0.5).sum()):>9}   mean gain {g_[1:].mean():.3f}")
         print()
 
-    filt, gains = run_filter(args.gain, alpha=args.alpha, z_mid=args.z_mid)
-
-    e_dead, e_meas, e_filt = err(dead), err(meas), err(filt)
+    # --- headline, aggregated over noise seeds ----------------------------
+    # Raw recall never sees the odometry, so its stats are seed-independent
+    # and reported once.
+    e_meas = err(meas)
     jump_meas = np.hypot(*np.diff(meas, axis=0).T)
-    jump_filt = np.hypot(*np.diff(filt, axis=0).T)
     jump_true = np.hypot(*np.diff(XY, axis=0).T)
 
-    print(f"\ngain: {args.gain}" + (f" (alpha={args.alpha})" if args.gain == "fixed"
-          else f" (z_mid={args.z_mid}, mean gain {gains[1:].mean():.3f})"))
-    hdr = f"{'track':<22}{'median':>9}{'mean':>9}{'p90':>9}{'max jump':>10}{'>0.5 m jumps':>14}"
-    print(hdr); print("-" * len(hdr))
-    for name, e, jp in (("dead reckoning", e_dead, np.hypot(*np.diff(dead, axis=0).T)),
-                        ("VSA recall (raw)", e_meas, jump_meas),
-                        ("VSA Kalman", e_filt, jump_filt),
-                        ("true trajectory", np.zeros(n), jump_true)):
-        print(f"{name:<22}{np.median(e):>9.3f}{e.mean():>9.3f}{np.percentile(e,90):>9.3f}"
-              f"{jp.max():>10.3f}{int((jp > 0.5).sum()):>14}")
+    per_seed = []
+    for ns in seeds:
+        dd, dead_t = make_odometry(ns, args.odom_noise, args.odom_bias)
+        STEP_h = make_steps(dd)
+        filt, gains = run_filter(args.gain, STEP_h, alpha=args.alpha, z_mid=args.z_mid)
+        e_d, e_f = err(dead_t), err(filt)
+        jp_d = np.hypot(*np.diff(dead_t, axis=0).T)
+        jp_f = np.hypot(*np.diff(filt, axis=0).T)
+        per_seed.append({
+            "noise_seed": ns,
+            "dead_median": float(np.median(e_d)),
+            "dead_mean": float(e_d.mean()),
+            "dead_final_drift": float(np.hypot(*(dead_t[-1] - XY[-1]))),
+            "dead_jumps_gt_0.5": int((jp_d > 0.5).sum()),
+            "filt_median": float(np.median(e_f)),
+            "filt_mean": float(e_f.mean()),
+            "filt_p90": float(np.percentile(e_f, 90)),
+            "filt_max_jump": float(jp_f.max()),
+            "filt_jumps_gt_0.5": int((jp_f > 0.5).sum()),
+            "mean_gain": float(gains[1:].mean())})
 
-    out = os.path.join(args.out_dir, "vsa_kalman.json")
+    agg = {k: mstd([p[k] for p in per_seed]) for k in
+           ("dead_median", "dead_mean", "dead_final_drift", "dead_jumps_gt_0.5",
+            "filt_median", "filt_mean", "filt_p90", "filt_max_jump",
+            "filt_jumps_gt_0.5", "mean_gain")}
+
+    print(f"\nheadline over {len(seeds)} noise seeds — gain: {args.gain}"
+          + (f" (alpha={args.alpha})" if args.gain == "fixed"
+             else f" (z_mid={args.z_mid}, mean gain "
+                  f"{agg['mean_gain'][0]:.3f}+/-{agg['mean_gain'][1]:.3f})"))
+    print(attribution)
+    hdr = (f"{'track':<22}{'median (m)':>16}{'mean (m)':>16}"
+           f"{'max jump (m)':>15}{'>0.5 m jumps':>14}")
+    print(hdr); print("-" * len(hdr))
+    print(f"{'dead reckoning':<22}"
+          f"{format(agg['dead_median'][0],'.3f') + '+/-' + format(agg['dead_median'][1],'.3f'):>16}"
+          f"{format(agg['dead_mean'][0],'.3f') + '+/-' + format(agg['dead_mean'][1],'.3f'):>16}"
+          f"{'—':>15}{format(agg['dead_jumps_gt_0.5'][0],'.1f'):>14}")
+    print(f"{'VSA recall (raw)*':<22}{np.median(e_meas):>16.3f}{e_meas.mean():>16.3f}"
+          f"{jump_meas.max():>15.3f}{int((jump_meas > 0.5).sum()):>14}")
+    print(f"{'VSA Kalman':<22}"
+          f"{format(agg['filt_median'][0],'.3f') + '+/-' + format(agg['filt_median'][1],'.3f'):>16}"
+          f"{format(agg['filt_mean'][0],'.3f') + '+/-' + format(agg['filt_mean'][1],'.3f'):>16}"
+          f"{format(agg['filt_max_jump'][0],'.2f') + '+/-' + format(agg['filt_max_jump'][1],'.2f'):>15}"
+          f"{format(agg['filt_jumps_gt_0.5'][0],'.1f') + '+/-' + format(agg['filt_jumps_gt_0.5'][1],'.1f'):>14}")
+    print(f"{'true trajectory':<22}{0.0:>16.3f}{0.0:>16.3f}{jump_true.max():>15.3f}"
+          f"{int((jump_true > 0.5).sum()):>14}")
+    print("* raw recall never sees odometry: seed-independent, reported once.")
+    print("mean+/-std is over noise seeds (std: ddof=1); per-seed values in the JSON.")
+
+    out = os.path.join(args.out_dir, "vsa_kalman_seeds.json")
     with open(out, "w") as f:
-        json.dump({"encoder": args.encoder, "treatment": args.treatment,
-                   "split": args.split, "n_memory": int(mem.sum()), "n_frames": n,
-                   "gain": args.gain, "mean_gain": float(gains[1:].mean()),
-                   "odom_noise": args.odom_noise, "odom_bias": args.odom_bias,
-                   "median": {"dead": float(np.median(e_dead)),
-                              "measurement": float(np.median(e_meas)),
-                              "filtered": float(np.median(e_filt))},
-                   "max_jump": {"measurement": float(jump_meas.max()),
-                                "filtered": float(jump_filt.max()),
-                                "true": float(jump_true.max())}}, f, indent=2)
+        json.dump({
+            "encoder": args.encoder, "treatment": args.treatment,
+            "split": args.split, "split_seed": args.seed,
+            "n_memory": int(mem.sum()), "n_frames": n,
+            "noise_seeds": seeds, "n_noise_seeds": len(seeds),
+            "gain": args.gain, "alpha": args.alpha,
+            "odom_noise": args.odom_noise, "odom_bias": args.odom_bias,
+            "attribution": attribution,
+            "std_definition": "sample std over noise seeds (ddof=1)",
+            "raw_recall": {"seed_independent": True,
+                           "median": float(np.median(e_meas)),
+                           "mean": float(e_meas.mean()),
+                           "p90": float(np.percentile(e_meas, 90)),
+                           "max_jump": float(jump_meas.max()),
+                           "jumps_gt_0.5": int((jump_meas > 0.5).sum())},
+            "true_max_jump": float(jump_true.max()),
+            "headline": {k: {"mean": agg[k][0], "std": agg[k][1]} for k in agg},
+            "headline_per_seed": per_seed,
+            "odom_sweep": sweep_json}, f, indent=2)
     print(f"\nwrote {out}")
+
+    if len(seeds) == 1:
+        # legacy single-run artifact, only meaningful for a single noise draw
+        p = per_seed[0]
+        legacy = os.path.join(args.out_dir, "vsa_kalman.json")
+        with open(legacy, "w") as f:
+            json.dump({"encoder": args.encoder, "treatment": args.treatment,
+                       "split": args.split, "n_memory": int(mem.sum()), "n_frames": n,
+                       "gain": args.gain, "mean_gain": p["mean_gain"],
+                       "noise_seed": seeds[0],
+                       "odom_noise": args.odom_noise, "odom_bias": args.odom_bias,
+                       "median": {"dead": p["dead_median"],
+                                  "measurement": float(np.median(e_meas)),
+                                  "filtered": p["filt_median"]},
+                       "max_jump": {"measurement": float(jump_meas.max()),
+                                    "filtered": p["filt_max_jump"],
+                                    "true": float(jump_true.max())}}, f, indent=2)
+        print(f"wrote {legacy}")
     print("'max jump' is the largest frame-to-frame move in the estimate; the true")
     print("trajectory's value is the physical ceiling, so anything above it is an")
     print("artefact the filter should be removing.")
