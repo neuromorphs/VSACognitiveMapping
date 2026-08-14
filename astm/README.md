@@ -8,6 +8,16 @@ running the *actual* `init-am` code as the episodic-memory engine (via the
 `external/` snapshot noted below) and extending it with a multi-trace
 spatio-temporal memory, calibration, working memory, and language queries.
 
+## ▸ GPU tasks for students/collaborators? Start at [`collab_tasks/README.md`](collab_tasks/README.md)
+
+Three independent, self-contained GPU tasks for the Replica/ConceptGraphs
+semantic-map comparison — pick any one, run it on whatever GPU you have,
+send the (small) output folder back. Each has a self-check gate and a
+pre-registered expectation, so a surprising result is still useful data.
+Also brings `student_gpu_package/` (the ConceptGraphs pipeline, hardened
+after a long chain of install fixes) and an updated `vsa_cognitive_mapping/`
+these tasks depend on.
+
 ## ▸ Running this yourself? Start at [`START_HERE.md`](START_HERE.md)
 
 Install, first run, GPU notes and the pipeline in order — plus

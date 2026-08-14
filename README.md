@@ -1,5 +1,11 @@
 # VSACognitiveMapping
 
+> **Looking for the GPU tasks to hand to students/collaborators?**
+> → **[astm/collab_tasks/README.md](astm/collab_tasks/README.md)** — three
+> ready-to-run tasks for the ConceptGraphs semantic-map comparison, pick
+> any one. For everything else on this branch (the ASTM memory system
+> itself), start at **[astm/README.md](astm/README.md)**.
+
 ## Summary
 
 TODO
